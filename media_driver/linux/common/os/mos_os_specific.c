@@ -80,24 +80,13 @@
 //!
 #define DUAL_VDBOX_KEY ('D'<<24|'V'<<8|'X'<<0)
 
-//MemNinja graphics counter
-extern int32_t MosMemAllocCounterGfx;
-
 //============= PRIVATE FUNCTIONS <BEGIN>=========================================
 
-void SetupApoMosSwitch(int32_t fd)
+bool SetupApoMosSwitch(int32_t fd)
 {
-    if (g_apoMosFlagInited)
-    {
-        return;
-    }
-
-    g_apoMosFlagInited = 1;
-
     if (fd < 0)
     {
-        g_apoMosEnabled = 0;
-        return;
+        return false;
     }
 
     //Read user feature to determine if apg mos is enabled.
@@ -106,21 +95,17 @@ void SetupApoMosSwitch(int32_t fd)
 
     if(estatus == MOS_STATUS_SUCCESS)
     {
-        g_apoMosEnabled = userfeatureValue;
-        return;
+        return (userfeatureValue != 0);
     }
     PRODUCT_FAMILY eProductFamily = IGFX_UNKNOWN;
     HWInfo_GetGfxProductFamily(fd, eProductFamily);
 
     if (eProductFamily >= IGFX_TIGERLAKE_LP)
     {
-        g_apoMosEnabled = 1;
+        return true;
     }
-    else
-    {
-        g_apoMosEnabled = 0;
-    }
-    return;
+
+    return false;
 }
 
 
@@ -210,7 +195,7 @@ int32_t Linux_GetCommandBuffer(
     }
 
     // Allocate the command buffer from GEM
-    cmd_bo = mos_bo_alloc(pOsContext->bufmgr,"MOS CmdBuf",iSize,4096, MOS_MEMPOOL_VIDEOMEMORY);     // Align to page boundary
+    cmd_bo = mos_bo_alloc(pOsContext->bufmgr,"MOS CmdBuf",iSize,4096, MOS_MEMPOOL_SYSTEMMEMORY);     // Align to page boundary
     if (cmd_bo == nullptr)
     {
         MOS_OS_ASSERTMESSAGE("Allocation of command buffer failed.");
@@ -871,7 +856,7 @@ MOS_STATUS Linux_InitGPUStatus(
     }
 
     // Allocate the command buffer from GEM
-    bo = mos_bo_alloc(pOsContext->bufmgr,"GPU Status Buffer", sizeof(MOS_GPU_STATUS_DATA)  * MOS_GPU_CONTEXT_MAX, 4096, MOS_MEMPOOL_VIDEOMEMORY);     // Align to page boundary
+    bo = mos_bo_alloc(pOsContext->bufmgr,"GPU Status Buffer", sizeof(MOS_GPU_STATUS_DATA)  * MOS_GPU_CONTEXT_MAX, 4096, MOS_MEMPOOL_SYSTEMMEMORY);     // Align to page boundary
     if (bo == nullptr)
     {
         MOS_OS_ASSERTMESSAGE("Allocation of GPU Status Buffer failed.");
@@ -1054,7 +1039,7 @@ uint32_t Linux_GetGPUTag(
 
         auto handle = osCxtSpecific->GetGpuContextHandle(mosGpuCtx);
         
-        if(g_apoMosEnabled)
+        if (pOsInterface->apoMosEnabled)
         {
             MOS_RESOURCE gpuStatusResource;
             MOS_ZeroMemory(&gpuStatusResource, sizeof(MOS_RESOURCE));
@@ -1317,8 +1302,8 @@ MOS_STATUS Linux_InitContext(
     if (nullptr == pContext ||
         nullptr == pOsDriverContext ||
         nullptr == pOsDriverContext->bufmgr ||
-        (nullptr == pOsDriverContext->m_gpuContextMgr && modularizedGpuCtxEnabled && !g_apoMosEnabled) ||
-        (nullptr == pOsDriverContext->m_cmdBufMgr && modularizedGpuCtxEnabled && !g_apoMosEnabled) ||
+        (nullptr == pOsDriverContext->m_gpuContextMgr && modularizedGpuCtxEnabled && !pOsDriverContext->m_apoMosEnabled) ||
+        (nullptr == pOsDriverContext->m_cmdBufMgr && modularizedGpuCtxEnabled && !pOsDriverContext->m_apoMosEnabled) ||
         0 >= pOsDriverContext->fd)
     {
         MOS_OS_ASSERT(false);
@@ -1574,7 +1559,7 @@ MOS_STATUS Mos_Specific_SetGpuContext(
         // Set GPU context handle
         pOsInterface->CurrentGpuContextHandle = pOsContextSpecific->GetGpuContextHandle(GpuContext);
 
-        if (g_apoMosEnabled)
+        if (pOsInterface->apoMosEnabled)
         {
             MOS_OS_CHK_STATUS_RETURN(MosInterface::SetGpuContext(
                 pOsInterface->osStreamState,
@@ -1612,7 +1597,7 @@ MOS_STATUS Mos_Specific_SetGpuContextFromHandle(MOS_INTERFACE *osInterface,
         // Set GPU context handle
         osInterface->CurrentGpuContextHandle = contextHandle;
 
-        if (g_apoMosEnabled)
+        if (osInterface->apoMosEnabled)
         {
             MOS_OS_CHK_STATUS_RETURN(
                 MosInterface::SetGpuContext(osInterface->osStreamState,
@@ -1713,7 +1698,7 @@ GMM_CLIENT_CONTEXT *Mos_Specific_GetGmmClientContext(
         return nullptr;
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::GetGmmClientContext(pOsInterface->osStreamState);
     }
@@ -1758,7 +1743,7 @@ void Mos_Specific_GetPlatform(
     MOS_OS_CHK_NULL(pOsInterface->pOsContext);
     MOS_OS_CHK_NULL(pPlatform);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         // apo wrapper
         auto platform = MosInterface::GetPlatform(pOsInterface->osStreamState);
@@ -1775,6 +1760,108 @@ finish:
     return;
 }
 
+MOS_STATUS Mos_DestroyInterface(PMOS_INTERFACE pOsInterface)
+{
+    MOS_OS_CHK_NULL_RETURN(pOsInterface);
+
+    MOS_STREAM_HANDLE streamState = pOsInterface->osStreamState;
+    MOS_OS_CHK_NULL_RETURN(streamState);
+
+    auto deviceContext = streamState->osDeviceContext;
+    MOS_OS_CHK_NULL_RETURN(deviceContext);
+
+    if (!Mos_Solo_IsEnabled())
+    {
+        OsContext *pOsContext = pOsInterface->osContextPtr;
+        MOS_OS_CHK_NULL_RETURN(pOsContext);
+        // APO MOS destory GPU contexts here instead of inside osContextPtr
+        OsContextSpecific *pOsContextSpecific = static_cast<OsContextSpecific *>(pOsContext);
+
+        auto gpuContextMgr = deviceContext->GetGpuContextMgr();
+        for (uint32_t i = 0; i < MOS_GPU_CONTEXT_MAX; i++)
+        {
+            if (pOsContextSpecific->GetGpuContextHandleByIndex(i) != MOS_GPU_CONTEXT_INVALID_HANDLE)
+            {
+                if (gpuContextMgr == nullptr)
+                {
+                    MOS_OS_ASSERTMESSAGE("GpuContextMgr is null when destroy GpuContext");
+                    break;
+                }
+                auto gpuContext = gpuContextMgr->GetGpuContext(pOsContextSpecific->GetGpuContextHandleByIndex(i));
+                if (gpuContext == nullptr)
+                {
+                    MOS_OS_ASSERTMESSAGE("cannot find the gpuContext corresponding to the active gpuContextHandle");
+                    continue;
+                }
+                gpuContextMgr->DestroyGpuContext(gpuContext);
+                pOsContextSpecific->SetGpuContextHandleByIndex(i, MOS_GPU_CONTEXT_INVALID_HANDLE);
+            }
+        }
+
+        pOsContext->CleanUp();
+
+        MOS_Delete(pOsContext);
+        pOsInterface->osContextPtr = nullptr;
+    }
+
+    if (pOsInterface->osCpInterface)
+    {
+        Delete_MosCpInterface(pOsInterface->osCpInterface);
+        pOsInterface->osCpInterface = NULL;
+    }
+
+    PMOS_CONTEXT perStreamParameters = (PMOS_CONTEXT)streamState->perStreamParameters;
+
+    if (perStreamParameters && perStreamParameters->bFreeContext)
+    {
+        perStreamParameters->SkuTable.reset();
+        perStreamParameters->WaTable.reset();
+        Mos_Specific_ClearGpuContext(perStreamParameters);
+
+#ifndef ANDROID
+        if (perStreamParameters->bKMDHasVCS2)
+        {
+            DestroyIPC(perStreamParameters);
+        }
+#endif
+
+        if (perStreamParameters->contextOffsetList.size())
+        {
+            perStreamParameters->contextOffsetList.clear();
+            perStreamParameters->contextOffsetList.shrink_to_fit();
+        }
+
+        if(Mos_Solo_IsEnabled())
+        {
+            Linux_ReleaseCmdBufferPool(perStreamParameters);
+            PCOMMAND_BUFFER pCurrCB = nullptr;
+            PCOMMAND_BUFFER pNextCB = nullptr;
+            for (uint32_t i = 0; i < MOS_GPU_CONTEXT_MAX; i++)
+            {
+                MOS_FreeMemAndSetNull(perStreamParameters->OsGpuContext[i].pCB);
+
+                pCurrCB = perStreamParameters->OsGpuContext[i].pStartCB;
+                for (; (pCurrCB); pCurrCB = pNextCB)
+                {
+                    pNextCB = pCurrCB->pNext;
+                    MOS_FreeMemAndSetNull(pCurrCB);
+                }
+            }
+            Linux_ReleaseGPUStatus(perStreamParameters);
+        }
+
+        perStreamParameters->GmmFuncs.pfnDeleteClientContext(perStreamParameters->pGmmClientContext);
+        MOS_FreeMemAndSetNull(perStreamParameters);
+        streamState->perStreamParameters = nullptr;
+    }
+
+    MosInterface::DestroyVirtualEngineState(streamState);
+    MOS_FreeMemAndSetNull(pOsInterface->pVEInterf);
+
+    MOS_OS_CHK_STATUS_RETURN(MosInterface::DestroyOsStreamState(streamState));
+    pOsInterface->osStreamState = nullptr;
+    return MOS_STATUS_SUCCESS;
+}
 //!
 //! \brief    Destroys OS specific allocations
 //! \details  Destroys OS specific allocations including destroying OS context
@@ -1790,11 +1877,23 @@ void Mos_Specific_Destroy(
 {
     MOS_UNUSED(bDestroyVscVppDeviceTag);
 
-    if( nullptr == pOsInterface )
+    if (nullptr == pOsInterface)
     {
         MOS_OS_ASSERTMESSAGE("input parameter, pOsInterface is NULL.");
         return;
     }
+
+    if (pOsInterface->apoMosEnabled)
+    {
+        MOS_STATUS status = Mos_DestroyInterface(pOsInterface);
+        if (status != MOS_STATUS_SUCCESS)
+        {
+            MOS_OS_ASSERTMESSAGE("Mos Destroy Interface failed.");
+        }
+        return;
+    }
+
+
 
     if (pOsInterface->modulizedMosEnabled && !Mos_Solo_IsEnabled())
     {
@@ -1806,7 +1905,7 @@ void Mos_Specific_Destroy(
         }
 
         // APO MOS destory GPU contexts here instead of inside osContextPtr
-        if (g_apoMosEnabled)
+        if (pOsInterface->apoMosEnabled)
         {
             OsContextSpecific* pOsContextSpecific = static_cast<OsContextSpecific*>(pOsContext);
             if (pOsInterface->osStreamState == nullptr)
@@ -1865,7 +1964,7 @@ void Mos_Specific_Destroy(
     }
     if (pOsInterface->pVEInterf)
     {
-        if (g_apoMosEnabled && pOsInterface->pVEInterf->veInterface)
+        if (pOsInterface->apoMosEnabled && pOsInterface->pVEInterf->veInterface)
         {
             pOsInterface->pVEInterf->veInterface->Destroy();
             MOS_Delete(pOsInterface->pVEInterf->veInterface);
@@ -1873,7 +1972,7 @@ void Mos_Specific_Destroy(
         MOS_FreeMemAndSetNull(pOsInterface->pVEInterf);
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         auto status = MosInterface::DestroyOsStreamState(pOsInterface->osStreamState);
         if (status != MOS_STATUS_SUCCESS)
@@ -1895,7 +1994,7 @@ void Mos_Specific_Destroy(
 MEDIA_FEATURE_TABLE *Mos_Specific_GetSkuTable(
     PMOS_INTERFACE pOsInterface)
 {
-    if (pOsInterface && g_apoMosEnabled)
+    if (pOsInterface && pOsInterface->apoMosEnabled)
     {
         // apo wrapper
         return MosInterface::GetSkuTable(pOsInterface->osStreamState);
@@ -1919,7 +2018,7 @@ MEDIA_FEATURE_TABLE *Mos_Specific_GetSkuTable(
 MEDIA_WA_TABLE *Mos_Specific_GetWaTable(
     PMOS_INTERFACE pOsInterface)
 {
-    if (pOsInterface && g_apoMosEnabled)
+    if (pOsInterface && pOsInterface->apoMosEnabled)
     {
         // apo wrapper
         return MosInterface::GetWaTable(pOsInterface->osStreamState);
@@ -1949,7 +2048,7 @@ MEDIA_SYSTEM_INFO *Mos_Specific_GetGtSystemInfo(
         return  nullptr;
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         // apo wrapper
         return MosInterface::GetGtSystemInfo(pOsInterface->osStreamState);
@@ -1985,7 +2084,7 @@ void Mos_Specific_ResetOsStates(
         return;
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         auto status = MosInterface::ResetCommandBuffer(pOsInterface->osStreamState, 0);
         if (MOS_FAILED(status))
@@ -2155,15 +2254,26 @@ MOS_STATUS Mos_Specific_AllocateResource(
         }
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         pParams->bBypassMODImpl = !((pOsInterface->modulizedMosEnabled) && (!Mos_Solo_IsEnabled()) && (osContextValid == true));
 
-        eStatus = MosInterface::AllocateResource(pOsInterface->osStreamState, pParams, pOsResource);
-        MOS_OS_CHK_NULL(pOsResource->pGmmResInfo);
-        MosUtilities::MosAtomicIncrement(&MosUtilities::m_mosMemAllocCounterGfx);
-        MOS_MEMNINJA_GFX_ALLOC_MESSAGE(pOsResource->pGmmResInfo, bufname, pOsInterface->Component,
-        (uint32_t)pOsResource->pGmmResInfo->GetSizeSurface(), pParams->dwArraySize, functionName, filename, line);
+        MOS_OS_CHK_NULL_RETURN(pOsInterface->osStreamState);
+
+        pOsInterface->osStreamState->component = pOsInterface->Component;
+
+        eStatus = MosInterface::AllocateResource(
+            pOsInterface->osStreamState,
+            pParams,
+            pOsResource
+#if MOS_MESSAGES_ENABLED
+            ,
+            functionName,
+            filename,
+            line
+#endif  // MOS_MESSAGES_ENABLED
+        );
+
         return eStatus;
     }
 
@@ -2182,7 +2292,7 @@ MOS_STATUS Mos_Specific_AllocateResource(
             return MOS_STATUS_INVALID_HANDLE;
         }
 
-        GraphicsResource::SetMemAllocCounterGfx(MosMemAllocCounterGfx);
+        GraphicsResource::SetMemAllocCounterGfx(MosUtilities::m_mosMemAllocCounterGfx);
 
         GraphicsResource::CreateParams params(pParams);
         eStatus = pOsResource->pGfxResource->Allocate(pOsInterface->osContextPtr, params);
@@ -2199,7 +2309,7 @@ MOS_STATUS Mos_Specific_AllocateResource(
             return MOS_STATUS_INVALID_HANDLE;
         }
 
-        MosMemAllocCounterGfx = GraphicsResource::GetMemAllocCounterGfx();
+        MosUtilities::m_mosMemAllocCounterGfx = GraphicsResource::GetMemAllocCounterGfx();
         MOS_OS_CHK_NULL(pOsResource->pGmmResInfo);
         MOS_MEMNINJA_GFX_ALLOC_MESSAGE(pOsResource->pGmmResInfo, bufname, pOsInterface->Component,
             (uint32_t)pOsResource->pGmmResInfo->GetSizeSurface(), pParams->dwArraySize, functionName, filename, line);
@@ -2390,7 +2500,7 @@ MOS_STATUS Mos_Specific_AllocateResource(
         eStatus = MOS_STATUS_NO_SPACE;
     }
 
-    MosMemAllocCounterGfx++;
+    MosUtilities::m_mosMemAllocCounterGfx++;
     MOS_MEMNINJA_GFX_ALLOC_MESSAGE(pOsResource->pGmmResInfo, bufname, pOsInterface->Component,
         (uint32_t)pOsResource->pGmmResInfo->GetSizeSurface(), pParams->dwArraySize, functionName, filename, line);
 
@@ -2429,7 +2539,7 @@ MOS_STATUS Mos_Specific_GetResourceInfo(
     MOS_OS_CHK_NULL(pOsResource);
     MOS_OS_CHK_NULL(pResDetails);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::GetResourceInfo(pOsInterface->osStreamState, pOsResource, *pResDetails);
     }
@@ -2601,31 +2711,19 @@ void Mos_Specific_FreeResource(
         }
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
-        bool byPassMod = !((pOsInterface->modulizedMosEnabled)
-           && (!pOsResource->bConvertedFromDDIResource)
-           && (osContextValid == true)
-           && (!Mos_Solo_IsEnabled())
-           && (pOsResource->pGfxResourceNext));
-
-        MosInterface::FreeResource(pOsInterface->osStreamState, pOsResource, 0);
-        if (!byPassMod)
-        {
-            MosUtilities::MosAtomicDecrement(&MosUtilities::m_mosMemAllocCounterGfx);
-            MOS_MEMNINJA_GFX_FREE_MESSAGE(pOsResource->pGmmResInfo, functionName, filename, line);
-            MOS_ZeroMemory(pOsResource, sizeof(*pOsResource));
-        }
-        else if (pOsResource->pGmmResInfo != nullptr && 
-            pOsInterface->pOsContext != nullptr &&
-            pOsInterface->pOsContext->pGmmClientContext != nullptr)
-        {
-            MosUtilities::MosAtomicDecrement(&MosUtilities::m_mosMemAllocCounterGfx);
-            MOS_MEMNINJA_GFX_FREE_MESSAGE(pOsResource->pGmmResInfo, functionName, filename, line);
-
-            pOsInterface->pOsContext->pGmmClientContext->DestroyResInfoObject(pOsResource->pGmmResInfo);
-            pOsResource->pGmmResInfo = nullptr;
-        }
+        MosInterface::FreeResource(
+            pOsInterface->osStreamState,
+            pOsResource,
+            0
+#if MOS_MESSAGES_ENABLED
+            ,
+            functionName,
+            filename,
+            line
+#endif
+        );
 
         return;
     }
@@ -2642,7 +2740,7 @@ void Mos_Specific_FreeResource(
             return;
         }
 
-        GraphicsResource::SetMemAllocCounterGfx(MosMemAllocCounterGfx);
+        GraphicsResource::SetMemAllocCounterGfx(MosUtilities::m_mosMemAllocCounterGfx);
 
         if (pOsResource && pOsResource->pGfxResource)
         {
@@ -2655,7 +2753,7 @@ void Mos_Specific_FreeResource(
         MOS_Delete(pOsResource->pGfxResource);
         pOsResource->pGfxResource = nullptr;
 
-        MosMemAllocCounterGfx = GraphicsResource::GetMemAllocCounterGfx();
+        MosUtilities::m_mosMemAllocCounterGfx = GraphicsResource::GetMemAllocCounterGfx();
         MOS_MEMNINJA_GFX_FREE_MESSAGE(pOsResource->pGmmResInfo, functionName, filename, line);
         MOS_ZeroMemory(pOsResource, sizeof(*pOsResource));
         return;
@@ -2705,7 +2803,7 @@ void Mos_Specific_FreeResource(
             pOsInterface->pOsContext != nullptr &&
             pOsInterface->pOsContext->pGmmClientContext != nullptr)
         {
-            MosMemAllocCounterGfx--;
+            MosUtilities::m_mosMemAllocCounterGfx--;
             MOS_MEMNINJA_GFX_FREE_MESSAGE(pOsResource->pGmmResInfo, functionName, filename, line);
 
             pOsInterface->pOsContext->pGmmClientContext->DestroyResInfoObject(pOsResource->pGmmResInfo);
@@ -2821,7 +2919,7 @@ void  *Mos_Specific_LockResource(
         }
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::LockMosResource(pOsInterface->osStreamState, pOsResource, pLockFlags);
     }
@@ -2955,7 +3053,7 @@ MOS_STATUS Mos_Specific_UnlockResource(
     MOS_OS_CHK_NULL(pOsResource);
     MOS_OS_CHK_NULL(pOsInterface->pOsContext);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::UnlockMosResource(pOsInterface->osStreamState, pOsResource);
     }
@@ -3062,7 +3160,7 @@ MOS_STATUS Mos_Specific_DecompResource(
     MOS_OS_CHK_NULL(pOsInterface->pOsContext);
     //---------------------------------------
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::DecompResource(pOsInterface->osStreamState, pOsResource);
     }
@@ -3118,7 +3216,7 @@ MOS_STATUS Mos_Specific_DoubleBufferCopyResource(
     MOS_OS_CHK_NULL(outputOsResource);
     //---------------------------------------
 
-    if (g_apoMosEnabled)
+    if (osInterface->apoMosEnabled)
     {
         return MosInterface::DoubleBufferCopyResource(osInterface->osStreamState, inputOsResource, outputOsResource, bOutputCompressed);
     }
@@ -3179,7 +3277,7 @@ MOS_STATUS Mos_Specific_MediaCopyResource2D(
     MOS_OS_CHK_NULL(outputOsResource);
     //---------------------------------------
     
-    if (g_apoMosEnabled)
+    if (osInterface->apoMosEnabled)
     {
         return MosInterface::MediaCopyResource2D(osInterface->osStreamState, inputOsResource, outputOsResource,
             copyWidth, copyHeight, copyInputOffset, copyOutputOffset, bOutputCompressed);
@@ -3219,7 +3317,7 @@ MOS_STATUS Mos_Specific_SetPatchEntry(
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
     MOS_OS_CHK_NULL_RETURN(pParams);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::SetPatchEntry(pOsInterface->osStreamState, pParams);
     }
@@ -3288,7 +3386,7 @@ MOS_STATUS Mos_Specific_RegisterResource (
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
     MOS_OS_CHK_NULL_RETURN(pOsResource);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
 #if MOS_COMMAND_RESINFO_DUMP_SUPPORTED
         GpuCmdResInfoDumpNext::GetInstance()->StoreCmdResPtr(pOsInterface, (const void *)pOsResource);
@@ -3389,7 +3487,7 @@ MOS_STATUS Mos_Specific_VerifyCommandBufferSize(
 
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::VerifyCommandBufferSize(pOsInterface->osStreamState, 0, dwRequestedSize, dwFlags);
     }
@@ -3476,7 +3574,7 @@ MOS_STATUS Mos_Specific_GetCommandBuffer(
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
     MOS_OS_CHK_NULL_RETURN(pCmdBuffer);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::GetCommandBuffer(pOsInterface->osStreamState, pCmdBuffer, dwFlags);
     }
@@ -3556,7 +3654,7 @@ MOS_STATUS Mos_Specific_SetIndirectStateSize(
 
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::SetupIndirectState(pOsInterface->osStreamState, uSize);
     }
@@ -3608,7 +3706,7 @@ MOS_STATUS Mos_Specific_GetIndirectState(
     MOS_OS_CHK_NULL_RETURN(puOffset);
     MOS_OS_CHK_NULL_RETURN(puSize);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         uint32_t offset = 0;
         uint32_t size   = 0;
@@ -3708,7 +3806,7 @@ MOS_STATUS Mos_Specific_GetIndirectStatePointer(
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
     MOS_OS_CHK_NULL_RETURN(pIndirectState);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         uint32_t offset = 0;
         uint32_t size   = 0;
@@ -3773,7 +3871,7 @@ void Mos_Specific_ReturnCommandBuffer(
         return;
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         auto status = MosInterface::ReturnCommandBuffer(pOsInterface->osStreamState, pCmdBuffer, dwFlags);
         if (MOS_FAILED(status))
@@ -3834,7 +3932,7 @@ MOS_LINUX_BO * Mos_GetNopCommandBuffer_Linux(
         return nullptr;
     }
 
-    bo = mos_bo_alloc(pOsInterface->pOsContext->bufmgr, "NOP_CMD_BO", 4096, 4096, MOS_MEMPOOL_VIDEOMEMORY);
+    bo = mos_bo_alloc(pOsInterface->pOsContext->bufmgr, "NOP_CMD_BO", 4096, 4096, MOS_MEMPOOL_SYSTEMMEMORY);
     if(bo == nullptr)
     {
         return nullptr;
@@ -3869,7 +3967,7 @@ MOS_LINUX_BO * Mos_GetBadCommandBuffer_Linux(
         return nullptr;
     }
 
-    bo = mos_bo_alloc(pOsInterface->pOsContext->bufmgr, "BAD_CMD_BO", 4096, 4096, MOS_MEMPOOL_VIDEOMEMORY);
+    bo = mos_bo_alloc(pOsInterface->pOsContext->bufmgr, "BAD_CMD_BO", 4096, 4096, MOS_MEMPOOL_SYSTEMMEMORY);
     if(bo == nullptr)
     {
         return nullptr;
@@ -3981,7 +4079,7 @@ MOS_STATUS Mos_Specific_SubmitCommandBuffer(
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
     MOS_OS_CHK_NULL_RETURN(pCmdBuffer);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::SubmitCommandBuffer(pOsInterface->osStreamState, pCmdBuffer, bNullRendering);
     }
@@ -4362,7 +4460,7 @@ uint64_t Mos_Specific_GetResourceGfxAddress(
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
     MOS_OS_CHK_NULL_RETURN(pResource);
     
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::GetResourceGfxAddress(pOsInterface->osStreamState, pResource);
     }
@@ -4397,7 +4495,7 @@ MOS_STATUS Mos_Specific_ResizeCommandBufferAndPatchList(
 
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::ResizeCommandBufferAndPatchList(pOsInterface->osStreamState, 0, dwRequestedCommandBufferSize, dwRequestedPatchListSize, dwFlags);
     }
@@ -4545,13 +4643,13 @@ MOS_STATUS Mos_Specific_CreateGpuContext(
         MOS_OS_CHK_NULL_RETURN(pOsContextSpecific);
 
         auto gpuContextMgr = pOsContextSpecific->GetGpuContextMgr();
-        if (!g_apoMosEnabled)
+        if (!pOsInterface->apoMosEnabled)
         {
             MOS_OS_CHK_NULL_RETURN(gpuContextMgr);
         }
 
         auto cmdBufMgr = pOsContextSpecific->GetCmdBufMgr();
-        if (!g_apoMosEnabled)
+        if (!pOsInterface->apoMosEnabled)
         {
             MOS_OS_CHK_NULL_RETURN(cmdBufMgr);
         }
@@ -4584,7 +4682,7 @@ MOS_STATUS Mos_Specific_CreateGpuContext(
         }
 
         createOption->gpuNode = GpuNode;
-        if (g_apoMosEnabled)
+        if (pOsInterface->apoMosEnabled)
         {
             // Update ctxBasedScheduling from legacy OsInterface
             pOsInterface->osStreamState->ctxBasedScheduling = pOsInterface->ctxBasedScheduling;
@@ -4658,7 +4756,7 @@ Mos_Specific_CreateGpuComputeContext(MOS_INTERFACE *osInterface,
             return MOS_GPU_CONTEXT_INVALID_HANDLE;
         }
 
-        if (g_apoMosEnabled)
+        if (osInterface->apoMosEnabled)
         {
             if (nullptr == osInterface->osStreamState)
             {
@@ -4772,7 +4870,7 @@ MOS_STATUS Mos_Specific_DestroyGpuContext(
 
         GPU_CONTEXT_HANDLE gpuContextHandle = pOsContextSpecific->GetGpuContextHandle(mosGpuCxt);
 
-        if (g_apoMosEnabled)
+        if (pOsInterface->apoMosEnabled)
         {
             return MosInterface::DestroyGpuContext(pOsInterface->osStreamState, gpuContextHandle);
         }
@@ -4809,7 +4907,7 @@ void Mos_Specific_SetPerfTag(
 
     MOS_OS_CHK_NULL_NO_STATUS_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         MOS_OS_CHK_NULL_NO_STATUS_RETURN(pOsInterface->osStreamState);
         pOsInterface->osStreamState->component = pOsInterface->Component;
@@ -4865,7 +4963,7 @@ void Mos_Specific_ResetPerfBufferID(
 {
     MOS_OS_CHK_NULL_NO_STATUS_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::ResetPerfBufferID(pOsInterface->osStreamState);
     }
@@ -4889,7 +4987,7 @@ void Mos_Specific_IncPerfBufferID(
 {
     MOS_OS_CHK_NULL_NO_STATUS_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::IncPerfBufferID(pOsInterface->osStreamState);
     }
@@ -4915,7 +5013,7 @@ void Mos_Specific_IncPerfFrameID(
 {
     MOS_OS_CHK_NULL_NO_STATUS_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::IncPerfFrameID(pOsInterface->osStreamState);
     }
@@ -4948,7 +5046,7 @@ uint32_t Mos_Specific_GetPerfTag(
         return 0;
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::GetPerfTag(pOsInterface->osStreamState);
     }
@@ -4981,7 +5079,7 @@ void Mos_Specific_SetPerfHybridKernelID(
 
     MOS_OS_CHK_NULL_NO_STATUS_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::SetPerfHybridKernelID(pOsInterface->osStreamState, KernelID);
     }
@@ -5012,7 +5110,7 @@ int32_t Mos_Specific_IsPerfTagSet(
         return bRet;
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::IsPerfTagSet(pOsInterface->osStreamState);
     }
@@ -5294,7 +5392,7 @@ MOS_STATUS Mos_Specific_GetGpuStatusBufferResource(
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
     MOS_OS_CHK_NULL_RETURN(pOsResource);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::GetGpuStatusBufferResource(pOsInterface->osStreamState, pOsResource, pOsInterface->osStreamState->currentGpuContextHandle);
     }
@@ -5344,7 +5442,7 @@ uint32_t Mos_Specific_GetGpuStatusTagOffset(
 
     uint32_t offset = 0;
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         // always 0 in apo
         return 0;
@@ -5395,7 +5493,7 @@ uint32_t Mos_Specific_GetGpuStatusTag(
 
         auto handle = osCxtSpecific->GetGpuContextHandle(mosGpuCtx);
 
-        if (g_apoMosEnabled)
+        if (pOsInterface->apoMosEnabled)
         {
             return MosInterface::GetGpuStatusTag(pOsInterface->osStreamState, handle);
         }
@@ -5451,7 +5549,7 @@ void Mos_Specific_IncrementGpuStatusTag(
 
         auto handle = osCxtSpecific->GetGpuContextHandle(mosGpuCtx);
 
-        if (g_apoMosEnabled)
+        if (pOsInterface->apoMosEnabled)
         {
             MosInterface::IncrementGpuStatusTag(pOsInterface->osStreamState, handle);
             return;
@@ -6037,7 +6135,7 @@ MOS_STATUS Mos_Specific_VerifyPatchListSize(
 
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         // No APO MOS interface support for this func, implement in wrapper
         auto streamState = pOsInterface->osStreamState;
@@ -6108,7 +6206,7 @@ MOS_STATUS Mos_Specific_ResetCommandBuffer(
     MOS_OS_CHK_NULL_RETURN(pOsInterface);
     MOS_OS_CHK_NULL_RETURN(pCmdBuffer);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::ResetCommandBuffer(pOsInterface->osStreamState, pCmdBuffer);
     }
@@ -6156,12 +6254,12 @@ MOS_STATUS Mos_Specific_GetMemoryCompressionMode(
     PGMM_RESOURCE_INFO      pGmmResourceInfo;
     GMM_RESOURCE_FLAG       flags; 
     MOS_STATUS              eStatus = MOS_STATUS_UNKNOWN;
-    MOS_UNUSED(pOsInterface);
     MOS_OS_FUNCTION_ENTER;
     MOS_OS_CHK_NULL(pOsResource);
     MOS_OS_CHK_NULL(pResMmcMode);
+    MOS_OS_CHK_NULL(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::GetMemoryCompressionMode(pOsInterface->osStreamState, pOsResource, *pResMmcMode);
     }
@@ -6218,11 +6316,11 @@ MOS_STATUS Mos_Specific_SetMemoryCompressionMode(
     PGMM_RESOURCE_INFO      pGmmResourceInfo = nullptr;
     GMM_RESOURCE_MMC_INFO   GmmResMmcMode = GMM_MMC_DISABLED;
     MOS_STATUS              eStatus = MOS_STATUS_UNKNOWN;
-    MOS_UNUSED(pOsInterface);
     MOS_OS_FUNCTION_ENTER;
     MOS_OS_CHK_NULL(pOsResource);
+    MOS_OS_CHK_NULL(pOsInterface);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::SetMemoryCompressionMode(pOsInterface->osStreamState, pOsResource, ResMmcMode);
     }
@@ -6273,12 +6371,12 @@ MOS_STATUS Mos_Specific_SetMemoryCompressionHint(
     PGMM_RESOURCE_INFO      pGmmResourceInfo = nullptr;
     uint32_t                uiArrayIndex = 0;
     MOS_STATUS              eStatus;
-    MOS_UNUSED(pOsInterface);
     MOS_OS_FUNCTION_ENTER;
     eStatus = MOS_STATUS_UNKNOWN;
     MOS_OS_CHK_NULL(pOsResource);
+    MOS_OS_CHK_NULL(pOsInterface);
 
-     if (g_apoMosEnabled)
+     if (pOsInterface->apoMosEnabled)
      {
          return MosInterface::SetMemoryCompressionHint(pOsInterface->osStreamState, pOsResource, bHintOn);
      }
@@ -6315,12 +6413,12 @@ MOS_STATUS Mos_Specific_GetMemoryCompressionFormat(
 
     PGMM_RESOURCE_INFO      pGmmResourceInfo;
     MOS_STATUS              eStatus = MOS_STATUS_UNKNOWN;
-    MOS_UNUSED(pOsInterface);
     MOS_OS_FUNCTION_ENTER;
     MOS_OS_CHK_NULL(pOsResource);
+    MOS_OS_CHK_NULL(pOsInterface);
     MOS_OS_CHK_NULL(pResMmcFormat);
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         return MosInterface::GetMemoryCompressionFormat(pOsInterface->osStreamState, pOsResource, pResMmcFormat);
     }
@@ -6624,13 +6722,8 @@ MEMORY_OBJECT_CONTROL_STATE Mos_Specific_CachePolicyGetMemoryObject(
     MOS_HW_RESOURCE_DEF         MosUsage,
     GMM_CLIENT_CONTEXT          *pGmmClientContext)
 {
-    if (g_apoMosEnabled)
-    {
-        // Force convert to stream handle for wrapper
-        return MosInterface::GetCachePolicyMemoryObject((MOS_STREAM_HANDLE)pGmmClientContext, MosUsage);
-    }
-
-    return Mos_CachePolicyGetMemoryObject(MosUsage, pGmmClientContext);
+   // Force convert to stream handle for wrapper
+    return MosInterface::GetCachePolicyMemoryObject((MOS_STREAM_HANDLE)pGmmClientContext, MosUsage);
 }
 
 //!
@@ -6670,15 +6763,8 @@ MOS_STATUS Mos_Specific_LoadLibrary(
     //---------------------------------
     MOS_OS_ASSERT(pFileName);
     //---------------------------------
-    if (g_apoMosEnabled)
-    {
-        MOS_STREAM_HANDLE osStreamState = (pOsInterface != nullptr) ? pOsInterface->osStreamState : nullptr;
-        return MosInterface::MosLoadLibrary(osStreamState, pFileName, ppvModule);
-    }
 
-    *ppvModule = dlopen(pFileName, RTLD_LAZY);
-
-    return ((*ppvModule) ? MOS_STATUS_SUCCESS : MOS_STATUS_LOAD_LIBRARY_FAILED);
+    return MosInterface::MosLoadLibrary(nullptr, pFileName, ppvModule);
 }
 
 //*-----------------------------------------------------------------------------
@@ -6699,13 +6785,8 @@ MOS_STATUS Mos_Specific_FreeLibrary(
     //---------------------------------
     MOS_OS_ASSERT(hInstance);
     //---------------------------------
-    if (g_apoMosEnabled)
-    {
-        return MosInterface::MosFreeLibrary(hInstance);
-    }
 
-    bStatus = dlclose(hInstance);
-    return (bStatus != 0) ? MOS_STATUS_SUCCESS : MOS_STATUS_UNKNOWN;
+    return MosInterface::MosFreeLibrary(hInstance);
 }
 
 //!
@@ -6945,6 +7026,8 @@ MOS_STATUS Mos_Specific_InitInterface(
     pOsInterface->veDefaultEnable             = true;
     pOsInterface->phasedSubmission            = true;
 
+    pOsInterface->apoMosEnabled               = pOsDriverContext->m_apoMosEnabled;
+
     // Create Linux OS Context
     pOsContext = (PMOS_OS_CONTEXT)MOS_AllocAndZeroMemory(sizeof(MOS_OS_CONTEXT));
     if (pOsContext == nullptr)
@@ -6953,6 +7036,7 @@ MOS_STATUS Mos_Specific_InitInterface(
         eStatus = MOS_STATUS_NO_SPACE;
         goto finish;
     }
+    pOsContext->m_apoMosEnabled = pOsInterface->apoMosEnabled;
 
     if (GMM_SUCCESS != OpenGmm(&pOsContext->GmmFuncs))
     {
@@ -7020,7 +7104,7 @@ MOS_STATUS Mos_Specific_InitInterface(
         goto finish;
     }
 
-    if (g_apoMosEnabled)
+    if (pOsInterface->apoMosEnabled)
     {
         pOsContext->m_osDeviceContext = pOsDriverContext->m_osDeviceContext;
         MOS_OS_CHK_STATUS(MosInterface::CreateOsStreamState(
@@ -7165,16 +7249,10 @@ MOS_STATUS Mos_Specific_InitInterface(
 
     pOsUserFeatureInterface->bIsNotificationSupported   = false;
     pOsUserFeatureInterface->pOsInterface               = pOsInterface;
-    pOsUserFeatureInterface->pfnEnableNotification      = MOS_UserFeature_EnableNotification;
-    pOsUserFeatureInterface->pfnDisableNotification     = MOS_UserFeature_DisableNotification;
-    pOsUserFeatureInterface->pfnParsePath               = MOS_UserFeature_ParsePath;
 
-    if (g_apoMosEnabled)
-    {
-        pOsUserFeatureInterface->pfnEnableNotification      = MosUtilities::MosUserFeatureEnableNotification;
-        pOsUserFeatureInterface->pfnDisableNotification     = MosUtilities::MosUserFeatureDisableNotification;
-        pOsUserFeatureInterface->pfnParsePath               = MosUtilities::MosUserFeatureParsePath;
-    }
+    pOsUserFeatureInterface->pfnEnableNotification      = MosUtilities::MosUserFeatureEnableNotification;
+    pOsUserFeatureInterface->pfnDisableNotification     = MosUtilities::MosUserFeatureDisableNotification;
+    pOsUserFeatureInterface->pfnParsePath               = MosUtilities::MosUserFeatureParsePath;
 
     // Init reset count for the context
     ret = mos_get_reset_stats(pOsInterface->pOsContext->intel_context, &dwResetCount, nullptr, nullptr);

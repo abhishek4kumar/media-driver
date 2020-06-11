@@ -30,7 +30,7 @@
 #include "mos_os_next.h"
 #include "mos_cmdbufmgr_next.h" 
 #include "mos_gpucontextmgr_next.h"
-#include "mediamemdecomp.h"
+#include "mos_decompression.h"
 
 class OsContextNext
 {
@@ -139,13 +139,64 @@ public:
     //!
     GMM_CLIENT_CONTEXT *GetGmmClientContext() { return m_gmmClientContext; }
 
+    //!
+    //! \brief  Get MosDecompression
+    //! \return ptr to MosDecompression
+    //!
+    MosDecompression *GetMosDecompression()
+    {
+        return m_mosDecompression;
+    }
+    //! \brief  Get the DumpFrameNum
+    //! \return The current dumped frameNum
+    //!
+    uint32_t GetDumpFrameNum() { return m_dumpframeNum; }
+
+    //!
+    //! \brief  Set the DumpFrameNum
+    //! \return update the FrameNum and return success
+    //!
+    MOS_STATUS SetDumpFrameNum(uint32_t framNum)
+    {
+        m_dumpframeNum = framNum;
+        return MOS_STATUS_SUCCESS;
+    }
+
+    //!
+    //! \brief  Reset the DumpFrameNum
+    //! \return init the FrameNum and return success
+    //!
+    MOS_STATUS ResetDumpFrameNum()
+    {
+        m_dumpframeNum = 0xffffffff;
+        return MOS_STATUS_SUCCESS;
+    }
+
+    //!
+    //! \brief  Get the dumpLoc
+    //! \return The current dumped GetdumpLoc
+    //!
+    char *GetdumpLoc() { return m_dumpLoc; }
+
+    //!
+    //! \brief  Reset the dumpLoc
+    //! \return init the dumpLoc and return success
+    //!
+    MOS_STATUS ResetdumpLoc()
+    {
+        m_dumpLoc[0] = 0;
+        return MOS_STATUS_SUCCESS;
+    }
+
     static const uint32_t m_cmdBufAlignment = 16;   //!> Cmd buffer alignment
 
 protected:
     GpuContextMgrNext              *m_gpuContextMgr     = nullptr; //!> GPU context manager of the device
     CmdBufMgrNext                  *m_cmdBufMgr         = nullptr; //!> Cmd buffer manager of the device
     GMM_CLIENT_CONTEXT             *m_gmmClientContext  = nullptr; //!> GMM client context of the device
-    MediaMemDecompBaseState        *m_mediaMemDecompState = nullptr; //!> Internal media state for memory decompression
+
+    uint32_t                        m_dumpframeNum = 0;             // For use when dump its compressed surface, override the frame number given from MediaVeboxDecompState
+    char                            m_dumpLoc[MAX_PATH] = {0};       // For use when dump its compressed surface, to distinguish each loc's pre/post decomp
 
     //! \brief  Platform string including product family, chipset family, etc
     PLATFORM                        m_platformInfo = {};
@@ -207,5 +258,8 @@ protected:
 
     //! \brief   Flag to indicate if implicit Tile is needed
     bool                            m_implicitTileNeeded = false;
+
+    //! \brief  the ptr to mos decompression module
+    MosDecompression *m_mosDecompression = nullptr;
 };
 #endif // #ifndef __MOS_CONTEXTNext_NEXT_H__

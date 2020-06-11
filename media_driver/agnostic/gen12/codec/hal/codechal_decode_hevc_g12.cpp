@@ -165,7 +165,7 @@ MOS_STATUS CodechalDecodeHevcG12::AllocateResourcesVariableSizes ()
         {
             // Not use CODECHAL_DECODE_CHK_STATUS_RETURN() here to avoid adding local variable
             // Error can still be caught by CODECHAL_DECODE_CHK_STATUS_RETURN() in InitAuxSurface
-            eStatus = m_secureDecoder->InitAuxSurface(&m_destSurface.OsResource, false);
+            eStatus = m_secureDecoder->InitAuxSurface(&m_destSurface.OsResource, false, true);
         }
         else
         {
@@ -191,12 +191,15 @@ MOS_STATUS CodechalDecodeHevcG12::AllocateResourceRefBefLoopFilter()
     }
 
     MOS_SURFACE surface;
+    MOS_ZeroMemory(&surface, sizeof(MOS_SURFACE));
+
     CODECHAL_DECODE_CHK_STATUS_MESSAGE_RETURN(AllocateSurface(
                                                   &surface,
                                                   m_destSurface.dwPitch,
                                                   m_destSurface.dwHeight,
                                                   "Reference before loop filter",
-                                                  m_destSurface.Format),
+                                                  m_destSurface.Format,
+                                                  m_destSurface.bCompressible),
         "Failed to allocate reference before loop filter for IBC.");
 
     m_resRefBeforeLoopFilter = surface.OsResource;
@@ -246,7 +249,7 @@ CodechalDecodeHevcG12::~CodechalDecodeHevcG12 ()
     }
     if (m_scalabilityState)
     {
-        CodecHalDecodeScalability_Destroy(m_scalabilityState);
+        CodecHalDecodeScalability_Destroy_G12(m_scalabilityState);
         MOS_FreeMemAndSetNull(m_scalabilityState);
     }
 
@@ -590,6 +593,7 @@ MOS_STATUS CodechalDecodeHevcG12::SetHucDmemParams (
     hucHevcS2LBss->DummyRefIdxState = 
         MEDIA_IS_WA(m_waTable, WaDummyReference) && !m_osInterface->bSimIsActive;
     hucHevcS2LBss->DummyVDControlState = MEDIA_IS_WA(m_waTable, Wa_14010222001);
+    hucHevcS2LBss->WaTileFlushScalability = MEDIA_IS_WA(m_waTable, Wa_2209620131);
 
     CODECHAL_DECODE_CHK_STATUS_RETURN(SetHucDmemS2LPictureBss(&hucHevcS2LBss->PictureBss));
     CODECHAL_DECODE_CHK_STATUS_RETURN(SetHucDmemS2LSliceBss(&hucHevcS2LBss->SliceBss[0]));
@@ -1754,9 +1758,16 @@ MOS_STATUS CodechalDecodeHevcG12::AddPipeEpilog(
 
 #ifdef _DECODE_PROCESSING_SUPPORTED
             CODECHAL_DEBUG_TOOL(
-                if (m_downsampledSurfaces && m_sfcState && m_sfcState->m_sfcOutputSurface) {
-                    m_downsampledSurfaces[m_hevcPicParams->CurrPic.FrameIdx].OsResource = m_sfcState->m_sfcOutputSurface->OsResource;
-                    decodeStatusReport.m_currSfcOutputPicRes                            = &m_downsampledSurfaces[m_hevcPicParams->CurrPic.FrameIdx].OsResource;
+                if (m_sfcState && m_sfcState->m_sfcOutputSurface) {
+                    if(m_downsampledSurfaces)
+                    {
+                        m_downsampledSurfaces[m_hevcPicParams->CurrPic.FrameIdx].OsResource = m_sfcState->m_sfcOutputSurface->OsResource;
+                        decodeStatusReport.m_currSfcOutputPicRes                            = &m_downsampledSurfaces[m_hevcPicParams->CurrPic.FrameIdx].OsResource;
+                    }
+                    else
+                    {
+                        decodeStatusReport.m_currSfcOutputPicRes = &(m_sfcState->m_sfcOutputSurface->OsResource);
+                    }
                 })
 #endif
             CODECHAL_DEBUG_TOOL(
@@ -2169,28 +2180,6 @@ MOS_STATUS CodechalDecodeHevcG12::DecodePrimitiveLevel()
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(CodecHalDecodeScalability_AdvanceRealTilePass(m_scalabilityState));
     }
-
-#ifdef LINUX 
- #ifdef _DECODE_PROCESSING_SUPPORTED
-    CODECHAL_DEBUG_TOOL(
-    if (m_sfcState->m_sfcOutputSurface)
-    {
-        MOS_SURFACE dstSurface;
-        MOS_ZeroMemory(&dstSurface, sizeof(dstSurface));
-        dstSurface.Format = Format_NV12;
-        dstSurface.OsResource = m_sfcState->m_sfcOutputSurface->OsResource;
-        CODECHAL_DECODE_CHK_STATUS_RETURN(CodecHalGetResourceInfo(
-                m_osInterface,
-                &dstSurface));
-
-        CODECHAL_DECODE_CHK_STATUS_RETURN(m_debugInterface->DumpYUVSurface(
-                &dstSurface,
-                CodechalDbgAttr::attrSfcOutputSurface,
-                "SfcDstSurf"));
-    }
-)
-#endif
-#endif
     return eStatus;
 }
 

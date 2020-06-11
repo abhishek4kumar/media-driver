@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2009-2019, Intel Corporation
+* Copyright (c) 2009-2020, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -586,7 +586,7 @@ struct MosStreamState
     bool  dumpCommandBuffer = false;                      //!< Flag to indicate if Dump command buffer is enabled
     bool  dumpCommandBufferToFile = false;                //!< Indicates that the command buffer should be dumped to a file
     bool  dumpCommandBufferAsMessages = false;            //!< Indicates that the command buffer should be dumped via MOS normal messages
-    char  sDirName[MOS_MAX_HLT_FILENAME_LEN] = {0};         //!< Dump Directory name - maximum 260 bytes length
+    char  sDirName[MOS_MAX_HLT_FILENAME_LEN] = {0};       //!< Dump Directory name - maximum 260 bytes length
 #endif // MOS_COMMAND_BUFFER_DUMP_SUPPORTED
 
 #if _DEBUG || _RELEASE_INTERNAL
@@ -718,6 +718,8 @@ typedef struct _MOS_INTERFACE
     int32_t                         bTriggerCodecHang;                            // trigger GPU HANG in codec
     int32_t                         bTriggerVPHang;                               //!< trigger GPU HANG in VP
 #endif // (_DEBUG || _RELEASE_INTERNAL)
+
+    bool                            apoMosEnabled;                                //!< apo mos or not
 
     MEMORY_OBJECT_CONTROL_STATE (* pfnCachePolicyGetMemoryObject) (
         MOS_HW_RESOURCE_DEF         Usage,
@@ -1341,6 +1343,15 @@ MOS_STATUS Mos_InitInterface(
     PMOS_INTERFACE      pOsInterface,
     PMOS_CONTEXT        pOsDriverContext,
     MOS_COMPONENT       component);
+
+//! \brief    Destroy the mos interface
+//! \details  MOS Interface release
+//! \param    PMOS_INTERFACE pOsInterface
+//!           [in/out] Pointer to OS Interface
+//! \return   MOS_STATUS
+//!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+//!
+MOS_STATUS Mos_DestroyInterface(PMOS_INTERFACE pOsInterface);
 
 //! \brief    Unified OS add command to command buffer
 //! \details  Offset returned is dword aligned but size requested can be byte aligned

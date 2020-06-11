@@ -324,6 +324,7 @@ MOS_FORMAT VpGetFormatFromMediaFormat(DDI_MEDIA_FORMAT mf)
     case Media_Format_P010:
         format = Format_P010;
         break;
+    case Media_Format_P012:
     case Media_Format_P016:
         format = Format_P016;
         break;
@@ -1261,6 +1262,12 @@ DdiVp_SetProcPipelineParams(
     //vaStatus = DdiVp_UpdateProcDeinterlaceParams(pVaDrvCtx, pVpHalSrcSurf, pPipelineParam);
     //DDI_CHK_RET(vaStatus, "Failed to update vphal advance deinterlace!");
 
+    // Use Render to do scaling for resolution larger than 8K
+    if(MEDIA_IS_WA(&pMediaCtx->WaTable, WaDisableVeboxFor8K))
+    {
+        pVpHalRenderParams->bDisableVeboxFor8K = true;
+    }
+
     // Scaling algorithm
     uScalingflags                    = pPipelineParam->filter_flags & VA_FILTER_SCALING_MASK;
     pVpHalSrcSurf->ScalingPreference = VPHAL_SCALING_PREFER_SFC;    // default
@@ -1624,7 +1631,9 @@ VAStatus DdiVp_InitCtx(VADriverContextP pVaDrvCtx, PDDI_VP_CONTEXT pVpCtx)
 
     pVpCtx->MosDrvCtx.pPerfData             = (PERF_DATA*)MOS_AllocAndZeroMemory(sizeof(PERF_DATA));
     pVpCtx->MosDrvCtx.m_osDeviceContext     = pMediaCtx->m_osDeviceContext;
-    if( nullptr == pVpCtx->MosDrvCtx.pPerfData)
+    pVpCtx->MosDrvCtx.m_apoMosEnabled       = pMediaCtx->m_apoMosEnabled;
+
+    if (nullptr == pVpCtx->MosDrvCtx.pPerfData)
     {
         return VA_STATUS_ERROR_ALLOCATION_FAILED;
     }
@@ -2036,6 +2045,12 @@ VPHAL_CSPACE DdiVp_GetColorSpaceFromMediaFormat(DDI_MEDIA_FORMAT format)
     case Media_Format_422V:
     case Media_Format_P010:
     case Media_Format_IMC3:
+    case Media_Format_AYUV:
+    case Media_Format_Y210:
+    case Media_Format_Y410:
+    case Media_Format_P016:
+    case Media_Format_Y216:
+    case Media_Format_Y416:
         ColorSpace = CSpace_BT601;
         break;
     default:
@@ -2271,6 +2286,7 @@ DdiVp_SetProcFilterDinterlaceParams(
             DIMode = DI_MODE_BOB;
             break;
         case VAProcDeinterlacingMotionAdaptive:
+        case VAProcDeinterlacingMotionCompensated:
             DIMode = DI_MODE_ADI;
             break;
         case VAProcDeinterlacingWeave:
@@ -2278,7 +2294,6 @@ DdiVp_SetProcFilterDinterlaceParams(
             return VA_STATUS_SUCCESS;
         case VAProcDeinterlacingNone:
             return VA_STATUS_SUCCESS;
-        case VAProcDeinterlacingMotionCompensated:
         default:
             VP_DDI_ASSERTMESSAGE("Deinterlacing type is unsupported.");
             return VA_STATUS_ERROR_UNIMPLEMENTED;
@@ -4156,7 +4171,7 @@ DdiVp_QueryVideoProcFilterCaps (
 
         /* Deinterlacing filter */
         case VAProcFilterDeinterlacing:
-            uExistCapsNum  = 2;
+            uExistCapsNum = 3;
             /* set input filter caps number to the actual number of filters in vp module */
             *num_filter_caps = uExistCapsNum;
             /* set the actual filter caps attribute in vp module */
@@ -4169,8 +4184,9 @@ DdiVp_QueryVideoProcFilterCaps (
                     return VA_STATUS_ERROR_MAX_NUM_EXCEEDED;
                 }
 
-                diCap[0].type                         = VAProcDeinterlacingBob;
-                diCap[1].type                         = VAProcDeinterlacingMotionAdaptive;
+                diCap[0].type = VAProcDeinterlacingBob;
+                diCap[1].type = VAProcDeinterlacingMotionAdaptive;
+                diCap[2].type = VAProcDeinterlacingMotionCompensated;
             }
             break;
 

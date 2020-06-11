@@ -21,3 +21,4 @@
 media_include_subdirectory(common)
 media_include_subdirectory(gen12)
 media_include_subdirectory(gen12_tgllp)
+media_include_subdirectory(m12)

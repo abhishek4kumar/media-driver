@@ -1158,7 +1158,6 @@ VAStatus DdiMediaDecode::CreateCodecHal(
 
     m_ddiDecodeCtx->pCodecHal = codecHal;
 
-    m_codechalSettings->enableCodecMmc = false;
     m_codechalSettings->sfcInUseHinted = true;
 
     if (m_ddiDecodeAttr && m_ddiDecodeAttr->uiEncryptionType)
@@ -1182,7 +1181,7 @@ VAStatus DdiMediaDecode::CreateCodecHal(
     }
 
 #ifdef _MMC_SUPPORTED
-    if (!g_apoMosEnabled                                                             &&
+    if (!osInterface->apoMosEnabled                                                  &&
         MEDIA_IS_SKU(osInterface->pfnGetSkuTable(osInterface), FtrMemoryCompression) &&
         !mediaCtx->pMediaMemDecompState)
     {
