@@ -21,7 +21,7 @@
 */
 //!
 //! \file     mhw_cp_interface.h
-//! \brief    MHW interface for content protection
+//! \brief    MHW interface for content protection 
 //! \details  Impelements the functionalities across all platforms for content protection
 //!
 
@@ -308,7 +308,7 @@ public:
 };
 
 //!
-//! \brief    Create MhwCpInterface Object
+//! \brief    Create MhwCpInterface Object according CPLIB loading status
 //!           Must use Delete_MhwCpInterface to delete created Object to avoid ULT Memory Leak errors
 //!
 //! \return   Return CP Wrapper Object if CPLIB not loaded
@@ -316,9 +316,9 @@ public:
 MhwCpInterface* Create_MhwCpInterface(PMOS_INTERFACE osInterface);
 
 //!
-//! \brief    Delete the MhwCpInterface Object
+//! \brief    Delete the MhwCpInterface Object according CPLIB loading status
 //!
-//! \param    [in] *pMhwCpInterface
+//! \param    [in] *pMhwCpInterface 
 //!           MhwCpInterface
 //!
 void Delete_MhwCpInterface(MhwCpInterface* pMhwCpInterface);

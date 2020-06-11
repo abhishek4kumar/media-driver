@@ -218,7 +218,6 @@ static bool InitIclMediaWa(struct GfxDeviceInfo *devInfo,
     MEDIA_WR_WA(waTable, WaDummyReference, 1);
 
     MEDIA_WR_WA(waTable, Wa16KInputHeightNV12Planar420, 1);
-    MEDIA_WR_WA(waTable, WaDisableCodecMmc, 1);
 
     return true;
 }
@@ -411,7 +410,6 @@ static bool InitEhlMediaWa(struct GfxDeviceInfo *devInfo,
     MEDIA_WR_WA(waTable, WaVeboxInputHeight16Aligned, 1);
 
     MEDIA_WR_WA(waTable, Wa16KInputHeightNV12Planar420, 1);
-    MEDIA_WR_WA(waTable, WaDisableCodecMmc, 1);
 
     return true;
 }

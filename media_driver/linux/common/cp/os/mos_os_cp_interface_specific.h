@@ -209,20 +209,20 @@ public:
 };
 
 //!
-//! \brief    Create MosCpInterface Object
+//! \brief    Create MosCpInterface Object according CPLIB loading status
 //!           Must use Delete_MosCpInterface to delete created Object to avoid ULT Memory Leak errors
 //!
 //! \param    [in] pvOsInterface
 //!           void*
 //!
-//! \return   Return CP Wrapper Object
+//! \return   Return CP Wrapper Object if CPLIB not loaded
 //!
 MosCpInterface* Create_MosCpInterface(void* pvOsInterface);
 
 //!
-//! \brief    Delete the MosCpInterface Object
+//! \brief    Delete the MosCpInterface Object according CPLIB loading status
 //!
-//! \param    [in] pMosCpInterface
+//! \param    [in] pMosCpInterface 
 //!           MosCpInterface
 //!
 void Delete_MosCpInterface(MosCpInterface* pMosCpInterface);

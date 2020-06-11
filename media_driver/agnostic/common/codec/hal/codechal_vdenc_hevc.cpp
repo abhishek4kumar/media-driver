@@ -2669,15 +2669,6 @@ MOS_STATUS CodechalVdencHevcState::SetSequenceStructs()
             return MOS_STATUS_INVALID_PARAMETER;
         }
         m_averageFrameSize = (uint32_t)(targetBitRate / frameRate);
-
-        if (m_targetBufferFulness == 0)
-        {
-            m_targetBufferFulness = m_hevcSeqParams->VBVBufferSizeInBit - m_hevcSeqParams->InitVBVBufferFullnessInBit;
-            uint32_t initVbvFullnessInFrames = MOS_MIN(m_hevcSeqParams->InitVBVBufferFullnessInBit, m_hevcSeqParams->VBVBufferSizeInBit) / m_averageFrameSize;
-            uint32_t vbvBufferSizeInFrames = m_hevcSeqParams->VBVBufferSizeInBit / m_averageFrameSize;
-            uint32_t encBufferFullness = (vbvBufferSizeInFrames - initVbvFullnessInFrames) * m_averageFrameSize;
-            m_bufferFulnessError = (int32_t)((int64_t)m_targetBufferFulness - (int64_t)encBufferFullness);
-        }
     }
 
     return eStatus;
@@ -2776,11 +2767,6 @@ MOS_STATUS CodechalVdencHevcState::SetPictureStructs()
                                                   (m_hevcPicParams->NumDirtyRects > 0 && (B_TYPE == m_hevcPicParams->CodingType)) || (m_b16XMeEnabled));
 
     CODECHAL_ENCODE_CHK_STATUS_RETURN(PrepareVDEncStreamInData());
-
-    if (m_encodeParams.bLaDataEnabled == false)
-    {
-        m_encodeParams.psLaDataBuffer = &m_vdencLaDataBuffer;
-    }
 
     return eStatus;
 }
@@ -2989,7 +2975,7 @@ MOS_STATUS CodechalVdencHevcState::GetStatusReport(
     }
 
     encodeStatusReport->cqmHint = 0xFF;
-    if (m_lookaheadPass && m_lookaheadUpdate && (encodeStatus->lookaheadStatus.targetFrameSize > 0))
+    if (m_lookaheadPass && m_lookaheadUpdate)
     {
         encodeStatusReport->pLookaheadStatus = &encodeStatus->lookaheadStatus;
         encodeStatus->lookaheadStatus.isValid = 1;
@@ -2997,28 +2983,6 @@ MOS_STATUS CodechalVdencHevcState::GetStatusReport(
         encodeStatus->lookaheadStatus.targetFrameSize = (uint32_t)((targetFrameSize + (32*8)) / (64*8)); // Convert bits to bytes. 64 is normalized average frame size used in lookahead analysis kernel
         uint64_t targetBufferFulness = (uint64_t)encodeStatus->lookaheadStatus.targetBufferFulness * m_averageFrameSize;
         encodeStatus->lookaheadStatus.targetBufferFulness = (uint32_t)((targetBufferFulness + 32) / 64); // 64 is normalized average frame size used in lookahead analysis kernel
-        // Apply rounding error to targetFrameSize to align target buffer fullness between lookahead pass and encode pass
-        if (encodeStatus->lookaheadStatus.targetFrameSize > 0)
-        {
-            if (m_prevTargetFrameSize > 0)
-            {
-                int64_t encTargetBufferFulness = (int64_t)m_targetBufferFulness;
-                encTargetBufferFulness += (int64_t)(m_prevTargetFrameSize << 3) - (int64_t)m_averageFrameSize;
-                m_targetBufferFulness = encTargetBufferFulness < 0 ?
-                    0 : (encTargetBufferFulness > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)encTargetBufferFulness);
-                int32_t deltaBits = (int32_t)((int64_t)(encodeStatus->lookaheadStatus.targetBufferFulness) + m_bufferFulnessError - (int64_t)(m_targetBufferFulness));
-                if (deltaBits > 8)
-                {
-                    encodeStatus->lookaheadStatus.targetFrameSize += (uint32_t)(deltaBits >> 3);
-                }
-                else if (deltaBits < -8)
-                {
-                    encodeStatus->lookaheadStatus.targetFrameSize -= (uint32_t)((-deltaBits) >> 3);
-                }
-            }
-            m_prevTargetFrameSize = encodeStatus->lookaheadStatus.targetFrameSize;
-        }
-
         encodeStatusReport->cqmHint = encodeStatus->lookaheadStatus.cqmHint;
         if (encodeStatus->lookaheadStatus.cqmHint > 1)
         {
@@ -3390,36 +3354,12 @@ MOS_STATUS CodechalVdencHevcState::AllocateBrcResources()
     MOS_ZeroMemory(lookaheadInfo, allocParamsForBufferLinear.dwBytes);
     m_osInterface->pfnUnlockResource(m_osInterface, &m_vdencLaStatsBuffer);
 
-    // Buffer to store lookahead output
-    allocParamsForBufferLinear.dwBytes  = MOS_ALIGN_CEIL(m_brcLooaheadDataBufferSize, CODECHAL_PAGE_SIZE);
-    allocParamsForBufferLinear.pBufName = "VDENC Lookahead Data Buffer";
-
-    CODECHAL_ENCODE_CHK_STATUS_MESSAGE_RETURN(m_osInterface->pfnAllocateResource(
-        m_osInterface,
-        &allocParamsForBufferLinear,
-        &m_vdencLaDataBuffer),
-        "Failed to create VDENC Lookahead Data Buffer");
-
-    CodechalVdencHevcLaData *lookaheadData = (CodechalVdencHevcLaData *)m_osInterface->pfnLockResource(
-        m_osInterface,
-        &m_vdencLaDataBuffer,
-        &lockFlagsWriteOnly);
-    CODECHAL_ENCODE_CHK_NULL_RETURN(lookaheadData);
-    MOS_ZeroMemory(lookaheadData, allocParamsForBufferLinear.dwBytes);
-    m_osInterface->pfnUnlockResource(m_osInterface, &m_vdencLaDataBuffer);
-
     return eStatus;
 }
 
 MOS_STATUS CodechalVdencHevcState::FreeBrcResources()
 {
     CODECHAL_ENCODE_FUNCTION_ENTER;
-
-    if (m_swBrcMode != nullptr)
-    {
-        m_osInterface->pfnFreeLibrary(m_swBrcMode);
-        m_swBrcMode = nullptr;
-    }
 
     for (auto i = 0; i < CODECHAL_ENCODE_RECYCLED_BUFFER_NUM; i++)
     {
@@ -3458,7 +3398,6 @@ MOS_STATUS CodechalVdencHevcState::FreeBrcResources()
     m_osInterface->pfnFreeResource(m_osInterface, &m_vdencBrcDbgBuffer);
     m_osInterface->pfnFreeResource(m_osInterface, &m_vdencOutputROIStreaminBuffer);
     m_osInterface->pfnFreeResource(m_osInterface, &m_vdencLaStatsBuffer);
-    m_osInterface->pfnFreeResource(m_osInterface, &m_vdencLaDataBuffer);
     m_osInterface->pfnFreeResource(m_osInterface, &m_vdencLaInitDmemBuffer);
     m_osInterface->pfnFreeResource(m_osInterface, &m_vdencLaHistoryBuffer);
 
@@ -3656,47 +3595,7 @@ CodechalVdencHevcState::CodechalVdencHevcState(
     MOS_ZeroMemory(&m_vdenc2ndLevelBatchBuffer, sizeof(m_vdenc2ndLevelBatchBuffer));
     MOS_ZeroMemory(m_resSliceReport, sizeof(m_resSliceReport));
     MOS_ZeroMemory(&m_vdencLaStatsBuffer, sizeof(m_vdencLaStatsBuffer));
-    MOS_ZeroMemory(&m_vdencLaDataBuffer, sizeof(m_vdencLaDataBuffer));
 
-}
-
-MOS_STATUS CodechalVdencHevcState::StoreHucErrorStatus(MmioRegistersHuc* mmioRegisters, PMOS_COMMAND_BUFFER cmdBuffer, bool addToEncodeStatus)
-{
-    // Write Huc Error Flag mask: DW1 (mask value)
-    MHW_MI_STORE_DATA_PARAMS storeDataParams;
-    MOS_ZeroMemory(&storeDataParams, sizeof(storeDataParams));
-    storeDataParams.pOsResource = &m_resHucErrorStatusBuffer;
-    storeDataParams.dwResourceOffset = sizeof(uint32_t);
-    storeDataParams.dwValue = CODECHAL_VDENC_HEVC_BRC_HUC_STATUS_MEMORY_ACCESS_ERROR_MASK;
-    CODECHAL_ENCODE_CHK_STATUS_RETURN(m_miInterface->AddMiStoreDataImmCmd(cmdBuffer, &storeDataParams));
-
-    // store HUC_STATUS register: DW0 (actual value)
-    MHW_MI_STORE_REGISTER_MEM_PARAMS storeRegParams;
-    MOS_ZeroMemory(&storeRegParams, sizeof(storeRegParams));
-    storeRegParams.presStoreBuffer = &m_resHucErrorStatusBuffer;
-    storeRegParams.dwOffset = 0;
-    storeRegParams.dwRegister = mmioRegisters->hucStatusRegOffset;
-    CODECHAL_ENCODE_CHK_STATUS_RETURN(m_miInterface->AddMiStoreRegisterMemCmd(cmdBuffer, &storeRegParams));
-
-    if(addToEncodeStatus)
-    {
-        EncodeStatusBuffer encodeStatusBuf = m_encodeStatusBuf;
-
-        uint32_t baseOffset =
-            (encodeStatusBuf.wCurrIndex * encodeStatusBuf.dwReportSize) + sizeof(uint32_t) * 2;  // pEncodeStatus is offset by 2 DWs in the resource
-
-        // store HUC_STATUS register
-        MHW_MI_STORE_REGISTER_MEM_PARAMS storeRegParams;
-        MOS_ZeroMemory(&storeRegParams, sizeof(storeRegParams));
-        storeRegParams.presStoreBuffer = &encodeStatusBuf.resStatusBuffer;
-        storeRegParams.dwOffset = baseOffset + encodeStatusBuf.dwHuCStatusRegOffset;
-        storeRegParams.dwRegister = mmioRegisters->hucStatusRegOffset;
-        CODECHAL_ENCODE_CHK_STATUS_RETURN(m_miInterface->AddMiStoreRegisterMemCmd(
-            cmdBuffer,
-            &storeRegParams));
-    }
-
-    return MOS_STATUS_SUCCESS;
 }
 
 #if USE_CODECHAL_DEBUG_TOOL

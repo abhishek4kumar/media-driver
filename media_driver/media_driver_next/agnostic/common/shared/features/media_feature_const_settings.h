@@ -49,11 +49,11 @@ public:
     //!
     //! \brief  MediaFeatureConstSettings deconstructor
     //!
-    virtual ~MediaFeatureConstSettings()
+    virtual ~MediaFeatureConstSettings() 
     {
         if (m_featureSetting != nullptr)
         {
-            MOS_FreeMemory(m_featureSetting);
+            MOS_Delete(m_featureSetting);
         }
     }
 

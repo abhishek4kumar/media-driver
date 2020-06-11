@@ -5495,36 +5495,22 @@ bool CompositeState::RenderBufferMediaWalker(
 
     if (pRenderingData->pTarget[1] == nullptr)
     {
-        if (pRenderingData->bCmFcEnable && pRenderingData->iLayers > 0)
-        {
-            pWalkerStatic->DW69.DestHorizontalBlockOrigin               = 0;
-            pWalkerStatic->DW69.DestVerticalBlockOrigin                 = 0;
-        }
-        else
-        {
-            pWalkerStatic->DW69.DestHorizontalBlockOrigin               =
-                 (uint16_t)pRenderingData->pTarget[0]->rcDst.left;
-            pWalkerStatic->DW69.DestVerticalBlockOrigin                 =
-                 (uint16_t)pRenderingData->pTarget[0]->rcDst.top;
-        }
+        pWalkerStatic->DW69.DestHorizontalBlockOrigin                  =
+             (uint16_t)pRenderingData->pTarget[0]->rcDst.left;
+        pWalkerStatic->DW69.DestVerticalBlockOrigin                    =
+             (uint16_t)pRenderingData->pTarget[0]->rcDst.top;
+
         AlignedRect   = pRenderingData->pTarget[0]->rcDst;
     }
     else
     {
         // Horizontal and Vertical base on non-rotated in case of dual output
-        if (pRenderingData->bCmFcEnable && pRenderingData->iLayers > 0)
-        {
-            pWalkerStatic->DW69.DestHorizontalBlockOrigin               = 0;
-            pWalkerStatic->DW69.DestVerticalBlockOrigin                 = 0;
-        }
-        else
-        {
-            pWalkerStatic->DW69.DestHorizontalBlockOrigin               =
-                (uint16_t)pRenderingData->pTarget[1]->rcDst.left;
-            pWalkerStatic->DW69.DestVerticalBlockOrigin                 =
-                 (uint16_t)pRenderingData->pTarget[1]->rcDst.top;
-        }
-        AlignedRect   = pRenderingData->pTarget[1]->rcDst;
+        pWalkerStatic->DW69.DestHorizontalBlockOrigin                   =
+            (uint16_t)pRenderingData->pTarget[1]->rcDst.left;
+        pWalkerStatic->DW69.DestVerticalBlockOrigin                     =
+             (uint16_t)pRenderingData->pTarget[1]->rcDst.top;
+
+         AlignedRect   = pRenderingData->pTarget[1]->rcDst;
     }
 
     ModifyMediaWalkerStaticData(pRenderingData);

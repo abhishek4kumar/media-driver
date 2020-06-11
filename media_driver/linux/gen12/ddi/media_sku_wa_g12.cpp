@@ -312,14 +312,7 @@ static bool InitTglMediaWa(struct GfxDeviceInfo *devInfo,
       CPU blt call will add/remove padding on the platform*/
     MEDIA_WR_WA(waTable, WaDisableGmmLibOffsetInDeriveImage, 1);
 
-    /*software wa to fix some corner cases of HEVC/VP9 SFC and Scalability*/
     MEDIA_WR_WA(waTable, Wa_14010222001, 1);
-
-    /*software wa to prevent error propagation for vertical intra refresh on H264 VDEnc*/
-    MEDIA_WR_WA(waTable, Wa_18011246551, 1);
-
-    MEDIA_WR_WA(waTable, WaDisableVeboxFor8K, 1);
-    MEDIA_WR_WA(waTable, WaDisableCodecMmc, 1);
 
     return true;
 }

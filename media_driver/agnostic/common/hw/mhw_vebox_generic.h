@@ -113,7 +113,6 @@ public:
             false,
             pVeboxSurfaceStateCmdParams->bDIEnable);
         Mos_AddCommand(pCmdBuffer, &cmd1, cmd1.byteSize);
-        MHW_NORMALMESSAGE("Vebox input Height: %d, Width: %d;", cmd1.DW2.Height, cmd1.DW2.Width);
 
         // Setup Surface State for Output surface
         if (bOutputValid)
@@ -133,7 +132,6 @@ public:
             }
 
             Mos_AddCommand(pCmdBuffer, &cmd2, cmd2.byteSize);
-            MHW_NORMALMESSAGE("Vebox output Height: %d, Width: %d;", cmd2.DW2.Height, cmd2.DW2.Width);
         }
 
     finish:

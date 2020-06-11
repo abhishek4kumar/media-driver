@@ -91,8 +91,6 @@ MOS_STATUS CmdTask::Submit(bool immediateSubmit, MediaScalability *scalability, 
         return MOS_STATUS_INVALID_PARAMETER;
     }
 
-    int8_t curPipe = -1;
-
     for (auto& prop : m_packets)
     {
         MEDIA_CHK_STATUS_RETURN(scalability->UpdateState(&prop.stateProperty));
@@ -104,13 +102,15 @@ MOS_STATUS CmdTask::Submit(bool immediateSubmit, MediaScalability *scalability, 
         MEDIA_CHK_STATUS_RETURN(packet->Prepare());
 
         MEDIA_CHK_STATUS_RETURN(scalability->GetCmdBuffer(&cmdBuffer));
-        //Set first packet for each pipe in the first pass, used for prolog & forcewakeup insertion
-        if (scalability->GetCurrentPass() == 0 && curPipe < scalability->GetCurrentPipe())
+
+        if (&prop == &m_packets.front())
         {
             packetPhase = MediaPacket::firstPacket;
         }
-
-        curPipe = scalability->GetCurrentPipe();
+        else if (&prop == &m_packets.back())
+        {
+            packetPhase = MediaPacket::lastPacket;
+        }
 
         MEDIA_CHK_STATUS_RETURN(packet->Submit(&cmdBuffer, packetPhase));
 

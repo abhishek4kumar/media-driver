@@ -57,7 +57,7 @@ public:
     //! \return   bool
     //!           true if mmc is enabled, else false
     //!
-    bool IsMmcEnabled();
+    static bool IsMmcEnabled();
 
     //!
     //! \brief    Disable MMC state 
@@ -234,7 +234,7 @@ public:
 
 protected:
 
-    bool                    m_mmcEnabled = false;                   //!< Indicate if media memory compression is enabled
+    static bool             m_mmcEnabled;                           //!< Indicate if media memory compression is enabled
     PMOS_INTERFACE          m_osInterface = nullptr;                //!< Os Inteface
     CodechalHwInterface     *m_hwInterface = nullptr;               //!< Pointer to HW Interface
     bool                    m_hcpMmcEnabled = false;                //!< Inidate if hcp mmc is enabled

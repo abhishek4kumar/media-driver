@@ -487,7 +487,8 @@ protected:
     CmKernel *         m_cmKrnB       = nullptr;
     CmProgram *        m_cmProgramB   = nullptr;
     CmKernel *         m_cmKrnB64     = nullptr;
-    CmProgram *        m_cmProgramB64 = nullptr;
+    CmProgram *        m_cmProgramB64 = nullptr; 
+    static CmDevice *  m_mfeCmDev;
     MbencBcurbeDataG12 m_curbeDataB = {};
 
     typedef SurfaceIndex MBencSurfaceIndex[m_maxMfeSurfaces][m_maxMultiFrames];

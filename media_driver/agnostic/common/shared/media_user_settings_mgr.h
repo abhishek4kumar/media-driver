@@ -54,6 +54,11 @@ public:
     //!
     static MOS_STATUS MediaUserSettingClose();
 
+    static bool      IsDefaultValueChanged()
+    {
+        return MosUtilUserInterface::IsDefaultValueChanged();
+    }
+
     MediaUserSettingsMgr();
     virtual ~MediaUserSettingsMgr();
 

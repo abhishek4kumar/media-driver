@@ -1050,19 +1050,6 @@ MOS_STATUS MhwVeboxInterfaceG12::AddVeboxDiIecp(
 
     if (pVeboxDiIecpCmdParams->pOsResCurrInput)
     {
-     // For IPU Camera only
-    #if !EMUL
-        GMM_RESOURCE_FLAG         gmmFlags = {0};
-        gmmFlags = pVeboxDiIecpCmdParams->pOsResCurrInput->pGmmResInfo->GetResFlags();
-        if (gmmFlags.Gpu.CameraCapture)
-        {
-            pVeboxDiIecpCmdParams->CurrInputSurfCtrl.Value = pOsInterface->pfnCachePolicyGetMemoryObject(
-                MOS_MHW_GMM_RESOURCE_USAGE_CAMERA_CAPTURE,
-                pOsInterface->pfnGetGmmClientContext(pOsInterface)).DwordValue;
-            MHW_NORMALMESSAGE(" disable the CameraCapture input caches ");
-        }
-    #endif
-
         if (pVeboxDiIecpCmdParams->CurInputSurfMMCState != MOS_MEMCOMP_DISABLED)
         {
             mhw_vebox_g12_X::VEB_DI_IECP_COMMAND_SURFACE_CONTROL_BITS_CMD *pSurfCtrlBits;
@@ -1074,6 +1061,7 @@ MOS_STATUS MhwVeboxInterfaceG12::AddVeboxDiIecp(
                 pSurfCtrlBits->DW0.CompressionType = pSurfCtrlBits->MEMORY_COMPRESSION_TYPE_RENDER_COMPRESSION_ENABLE;
             }
         }
+
         MOS_ZeroMemory(&ResourceParams, sizeof(ResourceParams));
         ResourceParams.presResource    = pVeboxDiIecpCmdParams->pOsResCurrInput;
         ResourceParams.dwOffset        = pVeboxDiIecpCmdParams->dwCurrInputSurfOffset + pVeboxDiIecpCmdParams->CurrInputSurfCtrl.Value;
@@ -2629,43 +2617,17 @@ MOS_STATUS MhwVeboxInterfaceG12::AdjustBoundary(
         break;
     }
 
-    //When Crop being used in vebox, source surface height/width is updated in VeboxAdjustBoundary(), and the rcMaxSrc is used for crop rectangle.
-    //But in dynamic Crop case, if the rcMaxSrc is larger than the rcSrc, the input pdwSurfaceHeight/pdwSurfaceWidth will be the input surface size.
-    //And if the target surface size is smaller than input surface, it may lead to pagefault issue . So in Vebox Crop case, we set the pdwSurfaceHeight/pdwSurfaceWidth
-    //with rcSrc to ensure Vebox input size is same with target Dstrec.
-    if (pSurfaceParam->bVEBOXCroppingUsed)
-    {
-        *pdwSurfaceHeight = MOS_ALIGN_CEIL(
-            MOS_MIN(pSurfaceParam->dwHeight, MOS_MAX((uint32_t)pSurfaceParam->rcSrc.bottom, MHW_VEBOX_MIN_HEIGHT)),
-            wHeightAlignUnit);
-        *pdwSurfaceWidth  = MOS_ALIGN_CEIL(
-            MOS_MIN(pSurfaceParam->dwWidth, MOS_MAX((uint32_t)pSurfaceParam->rcSrc.right, MHW_VEBOX_MIN_WIDTH)),
-            wWidthAlignUnit);
-        MHW_NORMALMESSAGE("bVEBOXCroppingUsed = true, pSurfaceParam->rcSrc.bottom: %d, pSurfaceParam->rcSrc.right: %d; pdwSurfaceHeight: %d, pdwSurfaceWidth: %d;",
-            (uint32_t)pSurfaceParam->rcSrc.bottom,
-            (uint32_t)pSurfaceParam->rcSrc.right,
-            *pdwSurfaceHeight,
-            *pdwSurfaceWidth);
-    }
-    else
-    {
-        // Align width and height with max src renctange with consideration of
-        // these conditions:
-        // The minimum of width/height should equal to or larger than
-        // MHW_VEBOX_MIN_WIDTH/HEIGHT. The maximum of width/heigh should equal
-        // to or smaller than surface width/height
-        *pdwSurfaceHeight = MOS_ALIGN_CEIL(
-            MOS_MIN(pSurfaceParam->dwHeight, MOS_MAX((uint32_t)pSurfaceParam->rcMaxSrc.bottom, MHW_VEBOX_MIN_HEIGHT)),
-            wHeightAlignUnit);
-        *pdwSurfaceWidth = MOS_ALIGN_CEIL(
-            MOS_MIN(pSurfaceParam->dwWidth, MOS_MAX((uint32_t)pSurfaceParam->rcMaxSrc.right, MHW_VEBOX_MIN_WIDTH)),
-            wWidthAlignUnit);
-        MHW_NORMALMESSAGE("bVEBOXCroppingUsed = false, pSurfaceParam->rcMaxSrc.bottom: %d, pSurfaceParam->rcMaxSrc.right: %d; pdwSurfaceHeight: %d, pdwSurfaceWidth: %d;",
-            (uint32_t)pSurfaceParam->rcMaxSrc.bottom,
-            (uint32_t)pSurfaceParam->rcMaxSrc.right,
-            *pdwSurfaceHeight,
-            *pdwSurfaceWidth);
-    }
+    // Align width and height with max src renctange with consideration of
+    // these conditions:
+    // The minimum of width/height should equal to or larger than
+    // MHW_VEBOX_MIN_WIDTH/HEIGHT. The maximum of width/heigh should equal
+    // to or smaller than surface width/height
+    *pdwSurfaceHeight = MOS_ALIGN_CEIL(
+        MOS_MIN(pSurfaceParam->dwHeight, MOS_MAX((uint32_t)pSurfaceParam->rcMaxSrc.bottom, MHW_VEBOX_MIN_HEIGHT)),
+        wHeightAlignUnit);
+    *pdwSurfaceWidth = MOS_ALIGN_CEIL(
+        MOS_MIN(pSurfaceParam->dwWidth, MOS_MAX((uint32_t)pSurfaceParam->rcMaxSrc.right, MHW_VEBOX_MIN_WIDTH)),
+        wWidthAlignUnit);
 
 finish:
     return eStatus;

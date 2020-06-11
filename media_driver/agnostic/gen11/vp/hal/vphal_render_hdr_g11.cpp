@@ -34,7 +34,7 @@ static const std::string OutputDumpDirectory(DumpRoot + "Output\\");
 static const std::string Hdr3DLutKernelName("hdr_3dlut");
 
 static const bool enableDump        = false;
-static const int32_t lutWidth       = 65*2;
+static const int32_t lutWidth       = 65;
 static const int32_t lutHeight      = 65 * 128;
 
 static const float ccm_identity[12] = { 1.0f, 0.0f, 0.0f, 0.0f,
@@ -211,22 +211,21 @@ static void CalcCCMMatrix()
     color_matrix_calculation[2][3] = 0.0f;
 }
 
-Hdr3DLutCmRender::Hdr3DLutCmRender(uint32_t *kernelBinary, uint32_t kernelSize, CmContext *cmContext) :
-    VPCmRenderer("Hdr3DLutCmRender", cmContext),
+Hdr3DLutCmRender::Hdr3DLutCmRender(uint32_t* kernelBinary, uint32_t kernelSize) :
+    VPCmRenderer("Hdr3DLutCmRender"),
     m_cmProgram(nullptr),
     m_cmKernel(nullptr),
     m_cmPayload(nullptr)
 {
     m_cmProgram = LoadProgram(kernelBinary, kernelSize);
 
-    VPHAL_RENDER_CHK_NULL_NO_STATUS_RETURN(cmContext);
     if (!m_cmProgram)
     {
         VPHAL_RENDER_ASSERTMESSAGE("Hdr3DLutCmRender [%s]: CM LoadProgram error %d\n");
         return;
     }
 
-    CmDevice *dev = cmContext->GetCmDevice();
+    CmDevice *dev = CmContext::GetCmContext().GetCmDevice();
     int result = dev->CreateKernel(m_cmProgram, _NAME(hdr_3dlut), m_cmKernel);
     if (result != CM_SUCCESS)
     {
@@ -236,8 +235,7 @@ Hdr3DLutCmRender::Hdr3DLutCmRender(uint32_t *kernelBinary, uint32_t kernelSize, 
 
 Hdr3DLutCmRender::~Hdr3DLutCmRender()
 {
-    VPHAL_RENDER_CHK_NULL_NO_STATUS_RETURN(m_cmContext);
-    CmDevice *dev = m_cmContext->GetCmDevice();
+    CmDevice *dev = CmContext::GetCmContext().GetCmDevice();
     if (m_cmKernel)
     {
         dev->DestroyKernel(m_cmKernel);
@@ -278,7 +276,7 @@ void Hdr3DLutCmRender::PrepareKernel(CmKernel *kernel)
     kernel->SetKernelArg(3, sizeof(uint16_t), &m_cmPayload->hdr3DLutSurfaceHeight);
 }
 
-Hdr3DLutGenerator::Hdr3DLutGenerator(PRENDERHAL_INTERFACE renderHal, uint32_t *kernelBinary, uint32_t kernelSize) :
+Hdr3DLutGenerator::Hdr3DLutGenerator(PRENDERHAL_INTERFACE renderHal, uint32_t* kernelBinary, uint32_t kernelSize) :
     m_renderHal(renderHal),
     m_hdr3DLutSurface(nullptr),
     m_hdrCoefSurface(nullptr),
@@ -289,10 +287,7 @@ Hdr3DLutGenerator::Hdr3DLutGenerator(PRENDERHAL_INTERFACE renderHal, uint32_t *k
     m_savedMaxCLL(4000),
     m_savedHdrMode(VPHAL_HDR_MODE_NONE)
 {
-    VPHAL_RENDER_CHK_NULL_NO_STATUS_RETURN(m_renderHal);
-    VPHAL_RENDER_CHK_NULL_NO_STATUS_RETURN(m_renderHal->pOsInterface);
-    m_cmContext    = MOS_New(CmContext, m_renderHal->pOsInterface->pOsContext);
-
+    m_eventManager = MOS_New(EventManager, "EventManager");
     VPHAL_RENDER_NORMALMESSAGE("Hdr3DLutGenerator Constructor!");
 
     m_kernelBinary = kernelBinary;
@@ -307,27 +302,28 @@ Hdr3DLutGenerator::~Hdr3DLutGenerator()
 
     MOS_Delete(m_eventManager);
 
-    MOS_Delete(m_cmContext);
+    CmContext::GetCmContext().DecRefCount();
+    m_bHdr3DLutInit = false;    
 
     VPHAL_RENDER_NORMALMESSAGE("Hdr3DLutGenerator Destructor!");
 }
 
 void Hdr3DLutGenerator::AllocateResources()
-{
+{    
     const int32_t coefWidth     = 8;
     const int32_t coefHeight    = 8;
-    const int32_t lutWidth      = 65*2;
+    const int32_t lutWidth      = 65;
     const int32_t lutHeight     = 65 * 128;
 
     // Allocate 3DLut buffer in CPU memory to init 3DLut Surface
     m_hdr3DLutSysBuffer = MOS_NewArray(uint8_t, m_lutSizeInBytes);
     Init3DLutSurface();
     // Allocate 3DLut Surface
-    m_hdr3DLutSurface = MOS_New(VpCmSurfaceHolder<CmSurface2D>, lutWidth, lutHeight, 1, ConvertMosFmtToGmmFmt(Format_A8R8G8B8), m_cmContext);
+    m_hdr3DLutSurface   = MOS_New(VpCmSurfaceHolder<CmSurface2D>, lutWidth, lutHeight, 1, ConvertMosFmtToGmmFmt(Format_A16B16G16R16));
     m_hdr3DLutSurface->GetCmSurface()->WriteSurface(m_hdr3DLutSysBuffer, nullptr);
 
     // Allocate Coefficient Surface in GPU memory
-    m_hdrCoefSurface = MOS_New(VpCmSurfaceHolder<CmSurface2D>, coefWidth, coefHeight, 1, GMM_FORMAT_B8G8R8A8_UNORM_TYPE, m_cmContext);
+    m_hdrCoefSurface    = MOS_New(VpCmSurfaceHolder<CmSurface2D>, coefWidth, coefHeight, 1, GMM_FORMAT_B8G8R8A8_UNORM_TYPE);
     // Allocate Coefficient Surface in CPU memory
     m_hdrcoefBuffer     = MOS_NewArray(float, coefWidth * coefHeight);
     return;
@@ -456,13 +452,15 @@ void Hdr3DLutGenerator::Render(const uint32_t maxDLL, const uint32_t maxCLL, con
     pOsInterface = m_renderHal->pOsInterface;
     VPHAL_RENDER_CHK_NULL_NO_STATUS(pOsInterface);
 
-    if (nullptr == m_hdr3DLutCmRender)
+    if (false == m_bHdr3DLutInit)
     {
-        m_eventManager = MOS_New(EventManager, "EventManager", m_cmContext);
-        VPHAL_RENDER_CHK_NULL_NO_STATUS(m_cmContext);
+        CmContext::sOsContext = m_renderHal->pOsInterface->pOsContext;
+        CmContext::GetCmContext().AddRefCount();
 
-        m_hdr3DLutCmRender = MOS_New(Hdr3DLutCmRender, m_kernelBinary, m_kernelSize, m_cmContext);
+        m_hdr3DLutCmRender = MOS_New(Hdr3DLutCmRender, m_kernelBinary, m_kernelSize);
         AllocateResources();
+
+        m_bHdr3DLutInit = true;
 
         VPHAL_RENDER_NORMALMESSAGE("Hdr3DLutGenerator Init Hdr3DLutCmRender and Allocate Necessary Resources!");
     }
@@ -482,11 +480,10 @@ void Hdr3DLutGenerator::Render(const uint32_t maxDLL, const uint32_t maxCLL, con
         hdr3DLutPayload.hdr3DLutSurfaceWidth = lutWidth;
         hdr3DLutPayload.hdr3DLutSurfaceHeight = lutHeight;
 
-        VPHAL_RENDER_CHK_NULL_NO_STATUS(m_cmContext);
-        m_cmContext->ConnectEventListener(m_eventManager);
+        CmContext::GetCmContext().ConnectEventListener(m_eventManager);
         m_hdr3DLutCmRender->Render(&hdr3DLutPayload);
-        m_cmContext->FlushBatchTask(false);
-        m_cmContext->ConnectEventListener(nullptr);
+        CmContext::GetCmContext().FlushBatchTask(false);
+        CmContext::GetCmContext().ConnectEventListener(nullptr);
 
         {
             MOS_LOCK_PARAMS         LockFlags;

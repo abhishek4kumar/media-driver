@@ -180,45 +180,27 @@ MOS_STATUS CodechalEncoderState::CreateGpuContexts()
         m_osInterface->pfnSetEncodePakContext(m_osInterface, m_videoContext);
     }
 
-    if (m_hwInterface->UsesRenderEngine(m_codecFunction, m_standard))
+    if (CodecHalUsesRenderEngine(m_codecFunction, m_standard))
     {
         MOS_GPU_CONTEXT gpuContext = MOS_GPU_CONTEXT_RENDER2;
         MOS_GPU_NODE renderGpuNode = MOS_GPU_NODE_3D;
-        MOS_GPUCTX_CREATOPTIONS createOption;
 
         if (!MEDIA_IS_SKU(m_skuTable, FtrCCSNode))
         {
             m_computeContextEnabled = false;
         }
 
-        if (m_osInterface->osCpInterface->IsHMEnabled() && MEDIA_IS_SKU(m_skuTable, FtrRAMode))
+        if (m_computeContextEnabled)
         {
-            if (m_computeContextEnabled)
-            {
-                gpuContext          = MOS_GPU_CONTEXT_COMPUTE_RA;
-                renderGpuNode       = MOS_GPU_NODE_COMPUTE;
-            }
-            else
-            {
-                gpuContext          = MOS_GPU_CONTEXT_RENDER_RA;
-                renderGpuNode       = MOS_GPU_NODE_3D;
-            }
-            createOption.RAMode     = 1;
+            gpuContext = MOS_GPU_CONTEXT_COMPUTE;
+            renderGpuNode = MOS_GPU_NODE_COMPUTE;
         }
         else
         {
-            if (m_computeContextEnabled)
-            {
-                gpuContext    = MOS_GPU_CONTEXT_COMPUTE;
-                renderGpuNode = MOS_GPU_NODE_COMPUTE;
-            }
-            else
-            {
-                gpuContext    = MOS_GPU_CONTEXT_RENDER2;
-                renderGpuNode = MOS_GPU_NODE_3D;
-            }
-            createOption.RAMode = 0;
+            gpuContext = MOS_GPU_CONTEXT_RENDER2;
+            renderGpuNode = MOS_GPU_NODE_3D;
         }
+        MOS_GPUCTX_CREATOPTIONS createOption;
 
         if (m_hwInterface->m_slicePowerGate)
         {
@@ -556,7 +538,7 @@ MOS_STATUS CodechalEncoderState::Allocate(CodechalSetting * codecHalSettings)
 
     CODECHAL_ENCODE_CHK_STATUS_RETURN(CreateGpuContexts());
 
-    if (m_hwInterface->UsesRenderEngine(codecHalSettings->codecFunction, codecHalSettings->standard))
+    if (CodecHalUsesRenderEngine(codecHalSettings->codecFunction, codecHalSettings->standard))
     {
         m_renderContextUsesNullHw = m_useNullHw[m_renderContext];
     }
@@ -632,7 +614,7 @@ MOS_STATUS CodechalEncoderState::Initialize(
         m_pakEnabled = true;
     }
 
-    if (m_hwInterface->UsesRenderEngine(m_codecFunction, m_standard))
+    if (CodecHalUsesRenderEngine(m_codecFunction, m_standard))
     {
         m_encEnabled = true;
     }
@@ -731,6 +713,34 @@ MOS_STATUS CodechalEncoderState::Initialize(
                     m_ssdTargetUsageThreshold = (uint32_t)userFeatureData.i32Data;
 #endif // _DEBUG || _RELEASE_INTERNAL
 
+#if (_DEBUG || _RELEASE_INTERNAL)
+                    MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+                    MOS_UserFeature_ReadValue_ID(
+                        nullptr,
+                        __MEDIA_USER_FEATURE_VALUE_ENCODE_BRC_SOFTWARE_ID,
+                        &userFeatureData);
+
+                    if (userFeatureData.i32Data)
+                    {
+                        char path_buffer[256];
+                        MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+                        MOS_ZeroMemory(path_buffer, 256);
+                        userFeatureData.StringData.pStringData = path_buffer;
+
+                        statusKey = MOS_UserFeature_ReadValue_ID(
+                            nullptr,
+                            __MEDIA_USER_FEATURE_VALUE_ENCODE_BRC_SOFTWARE_PATH_ID,
+                            &userFeatureData);
+
+                        if (statusKey == MOS_STATUS_SUCCESS && userFeatureData.StringData.uSize > 0)
+                        {
+                            CODECHAL_ENCODE_CHK_STATUS_RETURN(m_osInterface->pfnLoadLibrary(m_osInterface, path_buffer, &m_swBrcMode));
+                        }
+                    }
+                    // SW BRC DLL Reporting
+                    CodecHalEncode_WriteKey(__MEDIA_USER_FEATURE_VALUE_ENCODE_BRC_SOFTWARE_IN_USE_ID, (m_swBrcMode == nullptr) ? false : true);
+#endif // _DEBUG || _RELEASE_INTERNAL
+
                     if (!m_sliceShutdownDefaultState &&
                         !m_sliceShutdownRequestState &&
                         !m_ssdTargetUsageThreshold   &&
@@ -760,34 +770,6 @@ MOS_STATUS CodechalEncoderState::Initialize(
                 }
             }
         }
-
-#if (_DEBUG || _RELEASE_INTERNAL)
-        MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
-        MOS_UserFeature_ReadValue_ID(
-            nullptr,
-            __MEDIA_USER_FEATURE_VALUE_ENCODE_BRC_SOFTWARE_ID,
-            &userFeatureData);
-
-        if (userFeatureData.i32Data)
-        {
-            char path_buffer[256];
-            MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
-            MOS_ZeroMemory(path_buffer, 256);
-            userFeatureData.StringData.pStringData = path_buffer;
-
-            statusKey = MOS_UserFeature_ReadValue_ID(
-                nullptr,
-                __MEDIA_USER_FEATURE_VALUE_ENCODE_BRC_SOFTWARE_PATH_ID,
-                &userFeatureData);
-
-            if (statusKey == MOS_STATUS_SUCCESS && userFeatureData.StringData.uSize > 0)
-            {
-                CODECHAL_ENCODE_CHK_STATUS_RETURN(m_osInterface->pfnLoadLibrary(m_osInterface, path_buffer, &m_swBrcMode));
-            }
-        }
-        // SW BRC DLL Reporting
-        CodecHalEncode_WriteKey(__MEDIA_USER_FEATURE_VALUE_ENCODE_BRC_SOFTWARE_IN_USE_ID, (m_swBrcMode == nullptr) ? false : true);
-#endif // _DEBUG || _RELEASE_INTERNAL
 
         if (MEDIA_IS_SKU(m_skuTable, FtrSliceShutdown))
         {
@@ -1610,17 +1592,6 @@ MOS_STATUS CodechalEncoderState::AllocateResources()
                 &m_resPakMmioBuffer),
             "%s: Failed to allocate VDENC BRC PAK MMIO Buffer\n", __FUNCTION__);
 
-        // VDENC Huc Error Status Buffer
-        allocParamsForBufferLinear.dwBytes  = sizeof(VdencHucErrorStatus);
-        allocParamsForBufferLinear.pBufName = "VDENC Huc Error Status Buffer";
-
-        CODECHAL_ENCODE_CHK_STATUS_MESSAGE_RETURN(
-            m_osInterface->pfnAllocateResource(
-                m_osInterface,
-                &allocParamsForBufferLinear,
-                &m_resHucErrorStatusBuffer),
-            "%s: Failed to allocate VDENC Huc Error Status Buffer\n", __FUNCTION__);
-
         // VDEnc StreamIn data buffers, shared between driver/ME kernel/VDEnc
         if ((m_mode == CODECHAL_ENCODE_MODE_HEVC) || (m_mode == CODECHAL_ENCODE_MODE_VP9))
         {
@@ -2251,10 +2222,6 @@ void CodechalEncoderState::FreeResources()
         m_osInterface->pfnFreeResource(
             m_osInterface,
             &m_resPakMmioBuffer);
-
-        m_osInterface->pfnFreeResource(
-            m_osInterface,
-            &m_resHucErrorStatusBuffer);
 
         m_osInterface->pfnFreeResource(m_osInterface, &m_resHucFwBuffer);
 
@@ -3568,7 +3535,7 @@ MOS_STATUS CodechalEncoderState::ResetStatusReport()
         MOS_ZeroMemory(&genericPrologParams, sizeof(genericPrologParams));
         genericPrologParams.pOsInterface = m_osInterface;
         genericPrologParams.pvMiInterface = m_miInterface;
-        genericPrologParams.bMmcEnabled = m_mmcState ? m_mmcState->IsMmcEnabled() : false;
+        genericPrologParams.bMmcEnabled = CodecHalMmcState::IsMmcEnabled();
         genericPrologParams.presStoreData = (renderEngineInUse) ?
             &encodeStatusBufRcs->resStatusBuffer : &encodeStatusBuf->resStatusBuffer;
         genericPrologParams.dwStoreDataValue = m_storeData;
@@ -3798,11 +3765,6 @@ MOS_STATUS CodechalEncoderState::GetStatusReport(
             CODECHAL_DEBUG_TOOL(
                 m_statusReportDebugInterface->m_bufferDumpFrameNum = encodeStatus->dwStoredData;
             )
-
-            if (m_standard == CODECHAL_HEVC && m_vdencEnabled && (encodeStatus->HuCStatusReg & m_hucInterface->GetHevcVdencHucErrorFlagMask()))
-            {
-                CODECHAL_ENCODE_ASSERTMESSAGE("HuC status indicates error");
-            }
 
             // Current command is executed
             if (m_osInterface->pfnIsGPUHung(m_osInterface))
@@ -4168,12 +4130,6 @@ MOS_STATUS CodechalEncoderState::UserFeatureKeyReport()
     userFeatureWriteData.Value.i32Data = m_computeContextEnabled;
     userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_ENCODE_ENABLE_COMPUTE_CONTEXT_ID;
     MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1);
-
-    // Single Task Phase support reporting
-    userFeatureWriteData = __NULL_USER_FEATURE_VALUE_WRITE_DATA__;
-    userFeatureWriteData.Value.i32Data = m_singleTaskPhaseSupported;
-    userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_SINGLE_TASK_PHASE_ENABLE_ID;
-    MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1);
 #endif
 
     return eStatus;
@@ -4277,7 +4233,6 @@ MOS_STATUS CodechalEncoderState::SendPrologWithFrameTracking(
     }
 
 #ifdef _MMC_SUPPORTED
-    CODECHAL_ENCODE_CHK_NULL_RETURN(m_mmcState);
     CODECHAL_ENCODE_CHK_STATUS_RETURN(m_mmcState->SendPrologCmd(m_miInterface, cmdBuffer, gpuContext));
 #endif
 
@@ -4285,7 +4240,7 @@ MOS_STATUS CodechalEncoderState::SendPrologWithFrameTracking(
     MOS_ZeroMemory(&genericPrologParams, sizeof(genericPrologParams));
     genericPrologParams.pOsInterface            = m_osInterface;
     genericPrologParams.pvMiInterface     = m_miInterface;
-    genericPrologParams.bMmcEnabled             = m_mmcState ? m_mmcState->IsMmcEnabled() : false;
+    genericPrologParams.bMmcEnabled             = CodecHalMmcState::IsMmcEnabled();
     genericPrologParams.dwStoreDataValue = m_storeData - 1;
     CODECHAL_ENCODE_CHK_STATUS_RETURN(Mhw_SendGenericPrologCmd(cmdBuffer, &genericPrologParams, mmioRegister));
 
@@ -4419,7 +4374,7 @@ MOS_STATUS CodechalEncoderState::ExecuteEnc(
         // Check if source surface needs to be synchronized and should wait for decode or VPP or any other context
         syncParams.presSyncResource = &m_rawSurface.OsResource;
 
-        if (m_hwInterface->UsesRenderEngine(m_codecFunction, m_standard) &&
+        if (CodecHalUsesRenderEngine(m_codecFunction, m_standard) &&
             m_firstField)
         {
             syncParams.GpuContext = m_renderContext;
@@ -4490,7 +4445,7 @@ MOS_STATUS CodechalEncoderState::ExecuteEnc(
             m_trackedBuf->SetAllocationFlag(false);
         }
 
-        if (m_hwInterface->UsesRenderEngine(m_codecFunction, m_standard))
+        if (CodecHalUsesRenderEngine(m_codecFunction, m_standard))
         {
             // set render engine context
             m_osInterface->pfnSetGpuContext(m_osInterface, m_renderContext);
@@ -4698,7 +4653,6 @@ CodechalEncoderState::CodechalEncoderState(
         MOS_ZeroMemory(&m_resVdencStreamInBuffer[i], sizeof(m_resVdencStreamInBuffer[i]));
     }
     MOS_ZeroMemory(&m_resPakMmioBuffer, sizeof(m_resPakMmioBuffer));
-    MOS_ZeroMemory(&m_resHucErrorStatusBuffer, sizeof(m_resHucErrorStatusBuffer));
     MOS_ZeroMemory(&m_resHucStatus2Buffer, sizeof(m_resHucStatus2Buffer));
     MOS_ZeroMemory(&m_resHucFwBuffer, sizeof(m_resHucFwBuffer));
 

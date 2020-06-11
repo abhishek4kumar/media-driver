@@ -81,7 +81,6 @@ struct ScalabilityPars : public ContextRequirement
 
     uint8_t numVebox;
     bool    enableTileReplay = false;
-    uint32_t raMode = 0;
 };
 
 class ScalabilityTrace

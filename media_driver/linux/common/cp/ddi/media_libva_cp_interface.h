@@ -84,20 +84,20 @@ public:
 };
 
 //!
-//! \brief    Create DdiCpInterface Object
+//! \brief    Create DdiCpInterface Object according CPLIB loading status
 //!           Must use Delete_DdiCpInterface to delete created Object to avoid ULT Memory Leak errors
 //!
 //! \param    [in] *pMosCtx
 //!           MOS_CONTEXT*
 //!
-//! \return   Return CP Wrapper Object
+//! \return   Return CP Wrapper Object if CPLIB not loaded
 //!
 DdiCpInterface* Create_DdiCpInterface(MOS_CONTEXT& mosCtx);
 
 //!
-//! \brief    Delete the MhwCpInterface Object
+//! \brief    Delete the MhwCpInterface Object according CPLIB loading status
 //!
-//! \param    [in] *pDdiCpInterface
+//! \param    [in] *pDdiCpInterface 
 //!           DdiCpInterface
 //!
 void Delete_DdiCpInterface(DdiCpInterface* pDdiCpInterface);

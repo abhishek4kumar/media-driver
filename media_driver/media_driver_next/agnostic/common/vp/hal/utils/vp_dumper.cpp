@@ -31,7 +31,7 @@
 #include "vphal.h"
 #include "mos_os.h"
 #include "vp_dumper.h"
-#include "mos_context_next.h"
+
 
 #define ALLOC_GRANULARITY                           5000000
 
@@ -1147,6 +1147,8 @@ VpSurfaceDumper::~VpSurfaceDumper()
     MOS_SafeFreeMemory(m_dumpSpec.pDumpLocations);
 }
 
+uint32_t VpSurfaceDumper::m_frameNumInVp = 0xffffffff;
+char     VpSurfaceDumper::m_dumpLocInVp[MAX_PATH];
 
 MOS_STATUS VpSurfaceDumper::DumpSurface(
     PVPHAL_SURFACE                  pSurf,
@@ -1178,24 +1180,16 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
         m_dumpSpec.enableAuxDump = true; 
     }
 
-    OsContextNext *osCtx = nullptr;
-
-    if (m_osInterface && m_osInterface->osStreamState && m_osInterface->osStreamState->osDeviceContext)
+    if (m_frameNumInVp != 0xffffffff && isDumpFromDecomp)
     {
-        osCtx = m_osInterface->osStreamState->osDeviceContext;
-        if (osCtx && osCtx->GetDumpFrameNum() != 0xffffffff && isDumpFromDecomp)
-        {
-            // override the uiFrameNumer as it is during Vphal dumping its surface and already in lock and decomp phase
-            uiFrameNumber = osCtx->GetDumpFrameNum();
-        }
-
-        if (osCtx && !isDumpFromDecomp)
-        {
-            osCtx->SetDumpFrameNum(uiFrameNumber);
-        }
-
+        // override the uiFrameNumer as it is during Vphal dumping its surface and already in lock and decomp phase
+        uiFrameNumber = m_frameNumInVp;
     }
 
+    if (!isDumpFromDecomp)
+    {
+        m_frameNumInVp      = uiFrameNumber;
+    }
 
     // Get if manual triggered build
     MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
@@ -1217,27 +1211,19 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
                     (pDumpSpec->pDumpLocations[i].SurfType == pSurf->SurfType ||  // should dump for this surface type OR
                         pDumpSpec->pDumpLocations[i].SurfType == SURF_NONE))      // should dump for any surface type
                 {
-                    char *loc = nullptr;
-                    if (osCtx)
-                    {
-                        loc = osCtx->GetdumpLoc();
-                    }
                     VPHAL_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
-                    if (!isDumpFromDecomp && pSurf->bIsCompressed && loc)
+                    if (!isDumpFromDecomp && pSurf->bIsCompressed)
                     {
-                        EnumToLocString(Location, loc);
+                        EnumToLocString(Location, m_dumpLocInVp);
                     }
 
-                    if (!isDumpFromDecomp || (loc && loc[0] == 0))
+                    if (!isDumpFromDecomp || m_dumpLocInVp[0] == 0)
                     {
                         MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s]_lyr[%d]", pDumpSpec->pcOutputPath, m_dumpLoc, uiCounter);
                     }
                     else
                     {
-                        if (loc)
-                        {
-                            MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s_%s]_lyr[%d]", pDumpSpec->pcOutputPath, loc, m_dumpLoc, uiCounter);
-                        }
+                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s_%s]_lyr[%d]", pDumpSpec->pcOutputPath, m_dumpLocInVp, m_dumpLoc, uiCounter);
                     }
                     DumpSurfaceToFile(
                         m_osInterface,
@@ -1269,29 +1255,21 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
                 (pDumpSpec->pDumpLocations[i].SurfType == pSurf->SurfType ||    // should dump for this surface type OR
                  pDumpSpec->pDumpLocations[i].SurfType == SURF_NONE))           // should dump for any surface type
             {
-                char *loc = nullptr;
-                if (osCtx)
-                {
-                    loc = osCtx->GetdumpLoc();
-                }
                 VPHAL_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
-                if (!isDumpFromDecomp && pSurf->bIsCompressed && loc)
+                if (!isDumpFromDecomp && pSurf->bIsCompressed)
                 {
-                    EnumToLocString(Location, loc);
+                    EnumToLocString(Location, m_dumpLocInVp);
                 }
 
-                if (!isDumpFromDecomp || (loc && loc[0] == 0))
+                if (!isDumpFromDecomp || m_dumpLocInVp[0] == 0)
                 {
                     MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s]_lyr[%d]",
                         pDumpSpec->pcOutputPath, m_dumpLoc, uiCounter);
                 }
                 else
                 {
-                    if (loc)
-                    {
-                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s_%s]_lyr[%d]",
-                            pDumpSpec->pcOutputPath, loc, m_dumpLoc, uiCounter);
-                    }
+                    MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s_%s]_lyr[%d]",
+                        pDumpSpec->pcOutputPath, m_dumpLocInVp, m_dumpLoc, uiCounter);
                 }
 
                 DumpSurfaceToFile(
@@ -1312,10 +1290,10 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
     }
 
 finish:
-    if (!isDumpFromDecomp && osCtx)
+    if (!isDumpFromDecomp)
     {
-        osCtx->ResetDumpFrameNum();
-        osCtx->ResetdumpLoc();
+        m_frameNumInVp      = 0xffffffff;
+        m_dumpLocInVp[0]    = 0;
     }
     m_dumpSpec.enableAuxDump = orgDumpAuxEnable;
 

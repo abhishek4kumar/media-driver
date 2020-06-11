@@ -48,7 +48,7 @@ CodechalDecodeVp9G12 ::  ~CodechalDecodeVp9G12()
      }
      if (m_scalabilityState)
      {
-         CodecHalDecodeScalability_Destroy_G12(m_scalabilityState);
+         CodecHalDecodeScalability_Destroy(m_scalabilityState);
          MOS_FreeMemAndSetNull(m_scalabilityState);
      }
      //Note: virtual engine interface destroy is done in MOS layer
@@ -182,7 +182,7 @@ MOS_STATUS CodechalDecodeVp9G12 :: AllocateResourcesVariableSizes()
     {
         if (m_secureDecoder && m_secureDecoder->IsAuxDataInvalid(&m_destSurface.OsResource))
         {
-            CODECHAL_DECODE_CHK_STATUS_RETURN(m_secureDecoder->InitAuxSurface(&m_destSurface.OsResource, false, true));
+            CODECHAL_DECODE_CHK_STATUS_RETURN(m_secureDecoder->InitAuxSurface(&m_destSurface.OsResource, false));
         }
         else
         {

@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2020, Intel Corporation
+* Copyright (c) 2017-2019, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -21,7 +21,7 @@
 */
 //!
 //! \file       renderhal_g12.cpp
-//! \brief      implementation of Gen12 hardware functions
+//! \brief      implementation of Gen11 hardware functions
 //! \details    Render functions
 //!
 
@@ -142,8 +142,7 @@ MOS_STATUS XRenderHal_Interface_g12::SetupSurfaceState (
     MHW_RENDERHAL_CHK_NULL(pRenderHal->pStateHeap);
     MHW_RENDERHAL_CHK_NULL(pRenderHal->pHwSizes);
     MHW_RENDERHAL_CHK_NULL(pRenderHal->pMhwStateHeap);
-    MHW_RENDERHAL_ASSERT(pRenderHalSurface->Rotation >= 0 &&
-                         pRenderHalSurface->Rotation <= MHW_ROTATE_90_MIRROR_HORIZONTAL);
+    MHW_RENDERHAL_ASSERT(pRenderHalSurface->Rotation >= 0 && pRenderHalSurface->Rotation < 8);
     //-----------------------------------------
 
     dwSurfaceSize = pRenderHal->pHwSizes->dwSizeSurfaceState;
@@ -181,21 +180,6 @@ MOS_STATUS XRenderHal_Interface_g12::SetupSurfaceState (
         SurfStateParams.bTileWalk             = pSurfaceEntry->bTileWalk;
         SurfStateParams.dwCacheabilityControl = pRenderHal->pfnGetSurfaceMemoryObjectControl(pRenderHal, pParams);
         SurfStateParams.RotationMode          = g_cLookup_RotationMode_g12[pRenderHalSurface->Rotation];
-
-    #if !EMUL
-        if ((pSurface != nullptr) && (pRenderHal->pOsInterface !=nullptr))
-        {
-            GMM_RESOURCE_FLAG                   gmmFlags = {0};
-            gmmFlags = pSurface->OsResource.pGmmResInfo->GetResFlags();
-            if (gmmFlags.Gpu.CameraCapture)
-            {
-                SurfStateParams.dwCacheabilityControl = pRenderHal->pOsInterface->pfnCachePolicyGetMemoryObject(
-                    MOS_MHW_GMM_RESOURCE_USAGE_CAMERA_CAPTURE,
-                    pRenderHal->pOsInterface->pfnGetGmmClientContext(pRenderHal->pOsInterface)).DwordValue;
-                MHW_RENDERHAL_NORMALMESSAGE(" disable  CameraCapture  caches on render path ");
-            }
-        }
-    #endif
 
         if (IsFormatMMCSupported(pSurface->Format) &&
             m_renderHalMMCEnabled)
@@ -860,10 +844,12 @@ MOS_STATUS XRenderHal_Interface_g12::IsRenderHalMMCEnabled(
     UserFeatureData.bData       = true; // init as default value to enable MMCD on Gen12LP
 #endif
 
+#if (_DEBUG || _RELEASE_INTERNAL)
     MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
         nullptr,
         __MEDIA_USER_FEATURE_ENABLE_RENDER_ENGINE_MMC_ID,
         &UserFeatureData));
+#endif
 
     m_renderHalMMCEnabled = UserFeatureData.bData && MEDIA_IS_SKU(pRenderHal->pSkuTable, FtrE2ECompression);
     pRenderHal->isMMCEnabled = m_renderHalMMCEnabled;

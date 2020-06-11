@@ -537,12 +537,6 @@ MOS_STATUS CodechalVdencVp9StateG12::ExecuteDysSliceLevel()
     MOS_COMMAND_BUFFER cmdBuffer;
     CODECHAL_ENCODE_CHK_STATUS_RETURN(GetCommandBuffer(&cmdBuffer));
 
-    if (!m_singleTaskPhaseSupported)
-    {
-        PerfTagSetting perfTag;
-        CODECHAL_ENCODE_SET_PERFTAG_INFO(perfTag, CODECHAL_ENCODE_PERFTAG_CALL_PAK_ENGINE);
-    }
-
     MHW_BATCH_BUFFER secondLevelBatchBuffer;
     MOS_ZeroMemory(&secondLevelBatchBuffer, sizeof(secondLevelBatchBuffer));
     secondLevelBatchBuffer.dwOffset = 0;
@@ -3188,7 +3182,7 @@ MOS_STATUS CodechalVdencVp9StateG12::SendPrologWithFrameTracking(
         MOS_ZeroMemory(&genericPrologParams, sizeof(genericPrologParams));
         genericPrologParams.pOsInterface = m_hwInterface->GetOsInterface();
         genericPrologParams.pvMiInterface = m_hwInterface->GetMiInterface();
-        genericPrologParams.bMmcEnabled = m_mmcState ? m_mmcState->IsMmcEnabled() : false;
+        genericPrologParams.bMmcEnabled = CodecHalMmcState::IsMmcEnabled();
         genericPrologParams.dwStoreDataValue = m_storeData - 1;
         CODECHAL_ENCODE_CHK_STATUS_RETURN(Mhw_SendGenericPrologCmd(commandBufferInUse, &genericPrologParams));
     }
@@ -3385,7 +3379,7 @@ MOS_STATUS CodechalVdencVp9StateG12::SetPictureStructs()
             clearccswa = true;
         }
 
-        if (clearccswa && m_mmcState && m_mmcState->IsMmcEnabled())
+        if (clearccswa && CodecHalMmcState::IsMmcEnabled())
         {
             m_osInterface->pfnDecompResource(m_osInterface, &m_reconSurface.OsResource);
             m_osInterface->pfnSetGpuContext(m_osInterface, m_renderContext);
@@ -3749,11 +3743,6 @@ MOS_STATUS CodechalVdencVp9StateG12::ExecutePictureLevel()
     MOS_COMMAND_BUFFER cmdBuffer;
     CODECHAL_ENCODE_CHK_STATUS_RETURN(GetCommandBuffer(&cmdBuffer));
 
-    if (!m_singleTaskPhaseSupported)
-    {
-        CODECHAL_ENCODE_SET_PERFTAG_INFO(perfTag, CODECHAL_ENCODE_PERFTAG_CALL_PAK_ENGINE);
-    }
-
     // Non scalable mode header
     if ((!m_singleTaskPhaseSupported || m_firstTaskInPhase) && !m_scalableMode)
     {
@@ -4017,7 +4006,7 @@ MOS_STATUS CodechalVdencVp9StateG12::SetHcpPipeBufAddrParams(MHW_VDBOX_PIPE_BUF_
     pipeBufAddrParams.presCurMvTempBuffer = m_trackedBuf->GetMvTemporalBuffer(m_currMvTemporalBufferIndex);
     pipeBufAddrParams.bDynamicScalingEnable = (m_dysRefFrameFlags != DYS_REF_NONE) && !m_dysVdencMultiPassEnabled;
 
-    if (m_mmcState && m_mmcState->IsMmcEnabled() && m_reconSurface.bCompressible)
+    if (CodecHalMmcState::IsMmcEnabled() && m_reconSurface.bCompressible)
     {
         pipeBufAddrParams.PreDeblockSurfMmcState = MOS_MEMCOMP_HORIZONTAL;
         pipeBufAddrParams.PostDeblockSurfMmcState = pipeBufAddrParams.PreDeblockSurfMmcState;

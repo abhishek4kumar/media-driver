@@ -190,7 +190,7 @@ MOS_STATUS CodechalDecodeAvcG12::SetFrameStates()
     {
         if (m_secureDecoder && m_secureDecoder->IsAuxDataInvalid(&m_decodeParams.m_destSurface->OsResource))
         {
-            CODECHAL_DECODE_CHK_STATUS_RETURN(m_secureDecoder->InitAuxSurface(&m_decodeParams.m_destSurface->OsResource, false, true));
+            CODECHAL_DECODE_CHK_STATUS_RETURN(m_secureDecoder->InitAuxSurface(&m_decodeParams.m_destSurface->OsResource, false));
         }
         else
         {
@@ -360,7 +360,7 @@ MOS_STATUS CodechalDecodeAvcG12::DecodePrimitiveLevel()
                 }
             }
 
-            decodeStatusReport.m_secondField = m_secondField;
+            decodeStatusReport.m_secondField = CodecHal_PictureIsBottomField(m_avcPicParams->CurrPic);
             decodeStatusReport.m_frameType   = m_perfType;)
 
         CODECHAL_DECODE_CHK_STATUS_RETURN(EndStatusReport(decodeStatusReport, &cmdBuffer));
@@ -510,7 +510,7 @@ MOS_STATUS CodechalDecodeAvcG12::FormatAvcMonoPicture(PMOS_SURFACE surface)
         m_secureDecoder && m_osInterface->osCpInterface->IsHMEnabled())
     {
         CODECHAL_DECODE_VERBOSEMESSAGE("Initialize the UV aux data for %d submission", m_frameNum);
-        CODECHAL_DECODE_CHK_STATUS_RETURN(m_secureDecoder->InitAuxSurface(&surface->OsResource, true, true));
+        CODECHAL_DECODE_CHK_STATUS_RETURN(m_secureDecoder->InitAuxSurface(&surface->OsResource, true));
     }
 #endif
 

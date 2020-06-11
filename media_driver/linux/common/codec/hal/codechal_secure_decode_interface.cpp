@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2013-2020, Intel Corporation
+* Copyright (c) 2013-2018, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -21,11 +21,11 @@
 */
 //!
 //! \file      codechal_secure_decode_interface.cpp
-//! \brief     Stub file for CodecHal Secure Decode
+//! \brief     Stub file for CodecHal Secure Decode 
 //!
 
 #include "codechal_secure_decode_interface.h"
-#include "cp_interfaces.h"
+#include "cplib_utils.h"
 
 static void SecureDecodeStubMessage()
 {
@@ -36,34 +36,33 @@ CodechalSecureDecodeInterface *Create_SecureDecodeInterface(
     CodechalSetting *    codechalSettings,
     CodechalHwInterface *hwInterfaceInput)
 {
-    if (nullptr == codechalSettings || nullptr == hwInterfaceInput)
+    if(nullptr == codechalSettings || nullptr == hwInterfaceInput)
     {
         MOS_NORMALMESSAGE(MOS_COMPONENT_CP, MOS_CP_SUBCOMP_CODEC, "NULL pointer parameters");
         return nullptr;
     }
 
-    CpInterfaces *cp_interface = CpInterfacesFactory::Create(CP_INTERFACE);
-    if (nullptr == cp_interface)
-    {
-        MOS_NORMALMESSAGE(MOS_COMPONENT_CP, MOS_CP_SUBCOMP_CODEC, "NULL pointer parameters");
-        return nullptr;
-    }
+    CodechalSecureDecodeInterface *pCodechalSecureDecodeInterface = nullptr;
+    using Create_SecureDecodeFuncType                     = CodechalSecureDecodeInterface *(*)(
+        CodechalSetting * codecHalSettings, 
+        CodechalHwInterface * hwInterfaceInput);
 
-    CodechalSecureDecodeInterface *pInterface = nullptr;
-    pInterface = cp_interface->Create_SecureDecodeInterface(codechalSettings, hwInterfaceInput);
-    MOS_Delete(cp_interface);
+    CPLibUtils::InvokeCpFunc<Create_SecureDecodeFuncType>(
+        pCodechalSecureDecodeInterface, 
+        CPLibUtils::FUNC_CREATE_SECUREDECODE, 
+        codechalSettings, 
+        hwInterfaceInput);
 
-    if (nullptr == pInterface) SecureDecodeStubMessage();
+    if(nullptr == pCodechalSecureDecodeInterface) SecureDecodeStubMessage();
 
-    return pInterface;
+    return pCodechalSecureDecodeInterface;
 }
 
-void Delete_SecureDecodeInterface(CodechalSecureDecodeInterface *pInterface)
+void Delete_SecureDecodeInterface(CodechalSecureDecodeInterface *pCodechalSecureDecodeInterface)
 {
-    CpInterfaces *cp_interface = CpInterfacesFactory::Create(CP_INTERFACE);
-    if (pInterface != nullptr && cp_interface != nullptr)
+    if(pCodechalSecureDecodeInterface != nullptr)
     {
-        cp_interface->Delete_SecureDecodeInterface(pInterface);
+        using Delete_SecureDecodeFuncType = void (*)(CodechalSecureDecodeInterface* pCodechalSecureDecodeInterface);
+        CPLibUtils::InvokeCpFunc<Delete_SecureDecodeFuncType>(CPLibUtils::FUNC_DELETE_SECUREDECODE, pCodechalSecureDecodeInterface);
     }
-    MOS_Delete(cp_interface);
 }

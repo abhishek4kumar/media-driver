@@ -20,8 +20,8 @@
 * OTHER DEALINGS IN THE SOFTWARE.
 */
 //!
-//! \file      codechal_secure_decode_interface.h
-//! \brief     Stub file for CodecHal Secure Decode
+//! \file      codechal_secure_decode_interface.h 
+//! \brief     Stub file for CodecHal Secure Decode 
 //!
 #ifndef __CODECHAL_SECURE_DECODE_INTERFACE_H__
 #define __CODECHAL_SECURE_DECODE_INTERFACE_H__
@@ -124,8 +124,7 @@ public:
     //!
     virtual MOS_STATUS InitAuxSurface(
         PMOS_RESOURCE res,
-        bool auxUV,
-        bool isMmcEnabled) = 0;
+        bool auxUV) = 0;
 
     //!
     //! \brief  Is Dummy SteamOut Enabled
@@ -140,7 +139,7 @@ public:
     //!
     //! \brief  Destructor
     //!
-    virtual ~CodechalSecureDecodeInterface(){}
+    virtual ~CodechalSecureDecodeInterface(){} 
 
     //!
     //! \brief  Update huc streamout buffer index
@@ -150,19 +149,19 @@ public:
 
 
 //!
-//! \brief    Create CodechalSecureDeocde Object
+//! \brief    Create CodechalSecureDeocde Object according CPLIB loading status
 //!           Must use Delete_CodechalSecureDecodeInterface to delete created Object to avoid ULT Memory Leak errors
 //!
-//! \return   Return CP Wrapper Object
+//! \return   Return CP Wrapper Object if CPLIB not loaded
 //!
 CodechalSecureDecodeInterface *Create_SecureDecodeInterface(
     CodechalSetting *      codechalSettings,
     CodechalHwInterface *  hwInterfaceInput);
 
 //!
-//! \brief    Delete the CodecHalSecureDecode Object
+//! \brief    Delete the CodecHalSecureDecode Object according CPLIB loading status
 //!
-//! \param    [in] *pMhwCpInterface
+//! \param    [in] *pMhwCpInterface 
 //!           MhwCpInterface
 //!
 void Delete_SecureDecodeInterface(CodechalSecureDecodeInterface* pCodechalSecureDecodeInterface);

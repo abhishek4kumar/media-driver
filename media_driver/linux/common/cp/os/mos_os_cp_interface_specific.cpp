@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2009-2020, Intel Corporation
+* Copyright (c) 2009-2017, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -25,35 +25,40 @@
 //!
 
 #include "mos_os_cp_interface_specific.h"
-#include "cp_interfaces.h"
+#include "cplib_utils.h"
 #include "mos_os.h"
 
 MosCpInterface* Create_MosCpInterface(void* pvOsInterface)
 {
-    CpInterfaces *cp_interface = CpInterfacesFactory::Create(CP_INTERFACE);
-    if (nullptr == cp_interface)
-    {
-        MOS_NORMALMESSAGE(MOS_COMPONENT_CP, MOS_CP_SUBCOMP_OS, "NULL pointer parameters");
-        return nullptr;
-    }
-
     MosCpInterface* pMosCpInterface = nullptr;
-    pMosCpInterface = cp_interface->Create_MosCpInterface(pvOsInterface);
-    MOS_Delete(cp_interface);
+    using Create_MosCpFuncType = MosCpInterface* (*)(void* pvOsResource);
+    CPLibUtils::InvokeCpFunc<Create_MosCpFuncType>(
+        pMosCpInterface, 
+        CPLibUtils::FUNC_CREATE_MOSCP, pvOsInterface);
 
-    if (nullptr == pMosCpInterface) OsStubMessage();
+    if(nullptr == pMosCpInterface) OsStubMessage();
 
     return nullptr == pMosCpInterface ? MOS_New(MosCpInterface) : pMosCpInterface;
 }
 
-void Delete_MosCpInterface(MosCpInterface* pInterface)
+void Delete_MosCpInterface(MosCpInterface* pMosCpInterface)
 {
-    CpInterfaces *cp_interface = CpInterfacesFactory::Create(CP_INTERFACE);
-    if (pInterface != nullptr && cp_interface != nullptr)
+    if(nullptr == pMosCpInterface) 
     {
-        cp_interface->Delete_MosCpInterface(pInterface);
+        return;
     }
-    MOS_Delete(cp_interface);
+
+    if(typeid(MosCpInterface) == typeid(*pMosCpInterface))
+    {
+        MOS_Delete(pMosCpInterface);
+    }
+    else
+    {
+        using Delete_MosCpFuncType = void (*)(MosCpInterface*);
+        CPLibUtils::InvokeCpFunc<Delete_MosCpFuncType>(
+            CPLibUtils::FUNC_DELETE_MOSCP, 
+            pMosCpInterface);
+    }
 }
 
 

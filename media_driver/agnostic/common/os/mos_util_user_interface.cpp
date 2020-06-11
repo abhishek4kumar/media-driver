@@ -29,6 +29,7 @@
 
 std::map<uint32_t, PMOS_USER_FEATURE_VALUE> MosUtilUserInterface::m_userFeatureKeyMap;
 MosMutex                                    MosUtilUserInterface::m_mosMutex;
+bool                                        MosUtilUserInterface::m_defaultValueChanged = false;
 
 MOS_STATUS MosUtilUserInterface::AddEntry(const uint32_t keyId, PMOS_USER_FEATURE_VALUE userFeatureKey)
 {

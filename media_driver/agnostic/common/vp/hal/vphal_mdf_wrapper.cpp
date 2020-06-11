@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstdio>
 
+PMOS_CONTEXT CmContext::sOsContext = nullptr;
 
 void EventManager::OnEventAvailable(CmEvent *event, const std::string &name)
 {
@@ -53,9 +54,8 @@ void EventManager::AddEvent(const std::string &name, CmEvent *event)
 
 void EventManager::Clear()
 {
-    VPHAL_RENDER_CHK_NULL_NO_STATUS_RETURN(m_cmContext);
-    CmQueue *queue = m_cmContext->GetCmQueue();
-    VPHAL_RENDER_CHK_NULL_NO_STATUS_RETURN(queue);
+    CmQueue *queue = CmContext::GetCmContext().GetCmQueue();
+
     for (auto it : mEventMap)
     {
         for (CmEvent *event : it.second)
@@ -98,7 +98,7 @@ CmEvent* EventManager::GetLastEvent() const
     return mLastEvent;
 }
 
-CmContext::CmContext(PMOS_CONTEXT OsContext) :
+CmContext::CmContext():
     mRefCount(0),
     mCmDevice(nullptr),
     mCmQueue(nullptr),
@@ -109,7 +109,7 @@ CmContext::CmContext(PMOS_CONTEXT OsContext) :
     mCondParam({ 0 }),
     mEventListener(nullptr)
 {
-    VPHAL_RENDER_ASSERT(OsContext);
+    VPHAL_RENDER_ASSERT(sOsContext);
 
     const unsigned int MDF_DEVICE_CREATE_OPTION =
         ((CM_DEVICE_CREATE_OPTION_SCRATCH_SPACE_DISABLE)                                |
@@ -120,7 +120,7 @@ CmContext::CmContext(PMOS_CONTEXT OsContext) :
          (CM_DEVICE_CONFIG_GPUCONTEXT_ENABLE)                                           |
          (32 << CM_DEVICE_CONFIG_KERNELBINARYGSH_OFFSET));
 
-    int result = CreateCmDevice(OsContext, mCmDevice, MDF_DEVICE_CREATE_OPTION);
+    int result = CreateCmDevice(sOsContext, mCmDevice, MDF_DEVICE_CREATE_OPTION);
     if (result != CM_SUCCESS)
     {
         VPHAL_RENDER_ASSERTMESSAGE("CmDevice creation error %d\n", result);
@@ -359,9 +359,8 @@ CmContext::~CmContext()
     Destroy();
 }
 
-VPCmRenderer::VPCmRenderer(const std::string &name, CmContext *cmContext) :
+VPCmRenderer::VPCmRenderer(const std::string &name):
     mName(name),
-    m_cmContext(cmContext),
     mBatchDispatch(true),
     mBlockingMode(false),
     mEnableDump(false)
@@ -394,17 +393,9 @@ CmProgram* VPCmRenderer::LoadProgram(const std::string& binaryFileName)
     isa.read(code.data(), size);
 
     CmProgram *program = nullptr;
-    if (!m_cmContext)
-    {
-        return nullptr;
-    }
-    CmDevice *dev    = m_cmContext->GetCmDevice();
-    if (!dev)
-    {
-        return nullptr;
-    }
-    int       result = dev->LoadProgram(code.data(), size, program, "-nojitter");
-    if (result != CM_SUCCESS)
+    CmDevice *dev = CmContext::GetCmContext().GetCmDevice();
+    int result = dev->LoadProgram(code.data(), size, program, "-nojitter");
+    if (result != CM_SUCCESS )
     {
         VPHAL_RENDER_ASSERTMESSAGE("[%s]: CM LoadProgram error %d\n", mName.c_str(), result);
         return nullptr;
@@ -422,16 +413,8 @@ CmProgram* VPCmRenderer::LoadProgram(const void *binary, int size)
     }
 
     CmProgram *program = nullptr;
-    if (!m_cmContext)
-    {
-        return nullptr;
-    }
-    CmDevice *dev    = m_cmContext->GetCmDevice();
-    if (!dev)
-    {
-        return nullptr;
-    }
-    int       result = dev->LoadProgram(const_cast<void *>(binary), size, program, "-nojitter");
+    CmDevice *dev = CmContext::GetCmContext().GetCmDevice();
+    int result = dev->LoadProgram(const_cast<void *>(binary), size, program, "-nojitter");
     if (result != CM_SUCCESS)
     {
         VPHAL_RENDER_ASSERTMESSAGE("[%s]: CM LoadProgram error %d\n", mName.c_str(), result);
@@ -461,10 +444,8 @@ void VPCmRenderer::Render(void *payload)
         return;
     }
 
-    VPHAL_RENDER_CHK_NULL_NO_STATUS_RETURN(m_cmContext);
     CmThreadSpace *threadSpace = nullptr;
-    CmDevice *dev = m_cmContext->GetCmDevice();
-    VPHAL_RENDER_CHK_NULL_NO_STATUS_RETURN(dev);
+    CmDevice *dev = CmContext::GetCmContext().GetCmDevice();
     int result = dev->CreateThreadSpace(tsWidth, tsHeight, threadSpace);
     if (result != CM_SUCCESS)
     {
@@ -478,7 +459,7 @@ void VPCmRenderer::Render(void *payload)
     bool bBatch = mBatchDispatch && !mBlockingMode && !mEnableDump && !CannotAssociateThreadSpace();
     if (bBatch)
     {
-        kernel = m_cmContext->CloneKernel(kernel);
+        kernel = CmContext::GetCmContext().CloneKernel(kernel);
     }
 
     kernel->SetThreadCount(tsWidth * tsHeight * tsColor);
@@ -492,11 +473,11 @@ void VPCmRenderer::Render(void *payload)
 
     if (bBatch)
     {
-        m_cmContext->BatchKernel(kernel, threadSpace, NeedAddSync());
+        CmContext::GetCmContext().BatchKernel(kernel, threadSpace, NeedAddSync());
     }
     else
     {
-        m_cmContext->RunSingleKernel(kernel, CannotAssociateThreadSpace() ? threadSpace : nullptr, kernelName, mBlockingMode);
+        CmContext::GetCmContext().RunSingleKernel(kernel, CannotAssociateThreadSpace()? threadSpace : nullptr, kernelName, mBlockingMode);
         dev->DestroyThreadSpace(threadSpace);
     }
 

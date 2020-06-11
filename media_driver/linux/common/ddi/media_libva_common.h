@@ -191,7 +191,6 @@ typedef enum _DDI_MEDIA_FORMAT
     Media_Format_YVYU        ,
     Media_Format_A16R16G16B16,
     Media_Format_A16B16G16R16,
-    Media_Format_P012        ,
     Media_Format_Count
 } DDI_MEDIA_FORMAT;
 
@@ -220,7 +219,6 @@ typedef struct _DDI_MEDIA_SURFACE_DESCRIPTOR
     bool       bIsGralloc;                            // buffer allocated by Gralloc
     void      *pPrivateData;                          // brief reserved for passing private data
     GMM_RESCREATE_PARAMS GmmParam;                    // GMM Params for Gralloc buffer
-    uint64_t   modifier;                              // used for VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2
 } DDI_MEDIA_SURFACE_DESCRIPTOR,*PDDI_MEDIA_SURFACE_DESCRIPTOR;
 
 //!
@@ -300,6 +298,8 @@ typedef struct _DDI_MEDIA_SURFACE
     PMEDIA_SEM_T            pReferenceFrameSemaphore; // to sync reference frame surface. when this semaphore is posted, the surface is not used as reference frame, and safe to be destroied
 
     uint8_t                 *pSystemShadow;           // Shadow surface in system memory
+    bool                    bUseSysGfxMem;
+    _DDI_MEDIA_SURFACE      *pShadowSurface;
 
     uint32_t                uiMapFlag;
 } DDI_MEDIA_SURFACE, *PDDI_MEDIA_SURFACE;
@@ -427,8 +427,6 @@ struct DDI_MEDIA_CONTEXT
     PDDI_MEDIA_HEAP     pMfeCtxHeap;
     uint32_t            uiNumMfes;
 
-    bool                cpLibWasLoaded;
-
     // display info
     uint32_t            uiDisplayWidth;
     uint32_t            uiDisplayHeight;
@@ -512,7 +510,7 @@ struct DDI_MEDIA_CONTEXT
     MEDIA_MUTEX_T    PutSurfaceRenderMutex;
     MEDIA_MUTEX_T    PutSurfaceSwapBufferMutex;
 #endif
-    bool m_apoMosEnabled;
+    bool apoMosEnabled;
 };
 
 static __inline PDDI_MEDIA_CONTEXT DdiMedia_GetMediaContext (VADriverContextP ctx)

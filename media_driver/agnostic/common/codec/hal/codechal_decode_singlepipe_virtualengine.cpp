@@ -45,13 +45,12 @@ MOS_STATUS CodecHalDecodeSinglePipeVE_ConstructParmsForGpuCtxCreation(
     pVEInterface = pVEState->pVEInterface;
 
 #if (_DEBUG || _RELEASE_INTERNAL)
-    CODECHAL_DECODE_CHK_NULL_RETURN(pVEInterface->pOsInterface);
     if (pVEInterface->pOsInterface->bEnableDbgOvrdInVE)
     {
         gpuCtxCreatOpts->DebugOverride      = true;
         gpuCtxCreatOpts->LRCACount          = 1;
         gpuCtxCreatOpts->UsingSFC           = SFCInuse;  // this param ignored when dbgoverride enabled
-        if (pVEInterface->pOsInterface->apoMosEnabled)
+        if (g_apoMosEnabled)
         {
             CODECHAL_DECODE_CHK_NULL_RETURN(pVEInterface->veInterface);
             CODECHAL_DECODE_ASSERT(pVEInterface->veInterface->GetEngineCount() == 1);

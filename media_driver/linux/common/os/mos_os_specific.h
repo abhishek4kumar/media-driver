@@ -494,7 +494,7 @@ struct MOS_CONTEXT_OFFSET
 
 // APO related
 #define FUTURE_PLATFORM_MOS_APO   1234
-bool SetupApoMosSwitch(int32_t fd);
+void SetupApoMosSwitch(int32_t fd);
 
 enum OS_SPECIFIC_RESOURCE_TYPE
 {
@@ -583,7 +583,6 @@ struct _MOS_OS_CONTEXT
     std::vector< struct MOS_CONTEXT_OFFSET> contextOffsetList;
 
     bool                bSimIsActive;   //!< To indicate if simulation environment
-    bool                m_apoMosEnabled;  //!< apo mos or not
 
     // Media memory decompression function
     void (* pfnMemoryDecompress)(
